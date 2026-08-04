@@ -3,6 +3,7 @@
 // --------------------------------------------------------
 const LOCALE = 'es-AR';
 const STORAGE_KEY = 'dexterDashboard_v1';
+const HISTORY_KEY = 'dexterDashboard_history_v1'; // NUEVO: Llave para el historial
 
 const DOUGHNUT_COLORS = ['#e52329', '#f59e0b', '#27272a', '#52525b', '#10b981', '#3f3f46'];
 
@@ -139,8 +140,6 @@ function ActualizarDashboard(trData, abast, almac, pick, ctrl, desp) {
     });
 
     // 4. Actualizar Gráfico de Barras
-    // Nota: usamos escala lineal (no logarítmica) porque log no admite valores en 0
-    // y con datasets reales es fácil que algún estado quede en 0.
     if (barChartInstance) barChartInstance.destroy();
     barChartInstance = new Chart(document.getElementById('trBarChart'), {
         type: 'bar',
@@ -165,7 +164,7 @@ function ActualizarDashboard(trData, abast, almac, pick, ctrl, desp) {
         }
     });
 
-    // 5. Actualizar Gráfico de Dona (Top 5 + "Otros" agrupando el resto)
+    // 5. Actualizar Gráfico de Dona
     const top5Labels = labels.slice(0, 5);
     const top5Values = dataValues.slice(0, 5);
     const restoValor = dataValues.slice(5).reduce((acc, v) => acc + v, 0);
@@ -196,7 +195,7 @@ function ActualizarDashboard(trData, abast, almac, pick, ctrl, desp) {
         }
     });
 
-    // Leyenda manual debajo de la dona, con porcentajes
+    // Leyenda manual debajo de la dona
     const legendEl = document.getElementById('doughnutLegend');
     if (legendEl) {
         legendEl.innerHTML = doughnutLabels.map((label, i) => {
@@ -295,11 +294,14 @@ async function procesarArchivos() {
             avisos.push('No se encontró el estado "DISPATCHED" en el archivo de TRs; Despacho quedó en 0.');
         }
 
-        // 4. Actualizar visualmente
-        ActualizarDashboard(currentTRData, nuevosAbast, nuevosAlmac, nuevosPick, nuevosCtrl, nuevosDesp);
-        currentFechaReporte = "Reporte: Datos Actualizados (" + new Date().toLocaleDateString(LOCALE) + ")";
+        // 4. Actualizar visualmente y guardar en el historial
+        currentFechaReporte = "Carga: " + new Date().toLocaleString(LOCALE, {day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'});
         document.getElementById('fechaReporte').innerText = currentFechaReporte;
-        guardarEstado();
+        
+        // Guardar esta foto del momento (snapshot) en el historial antes de actualizar
+        guardarEnHistorial(currentFechaReporte, currentTRData, { abast: nuevosAbast, almac: nuevosAlmac, pick: nuevosPick, ctrl: nuevosCtrl, desp: nuevosDesp });
+        
+        ActualizarDashboard(currentTRData, nuevosAbast, nuevosAlmac, nuevosPick, nuevosCtrl, nuevosDesp);
 
         mostrarAvisoColumnas(avisos);
         cerrarModalUpdate();
@@ -336,8 +338,6 @@ function leerExcel(file) {
     });
 }
 
-// Suma una columna probando varios alias de nombre posibles.
-// Devuelve { total, encontrada } para que el llamador pueda avisar si no matcheó nada.
 function sumarColumna(datos, aliasColumna) {
     if (datos.length === 0) return { total: 0, encontrada: false };
 
@@ -359,8 +359,6 @@ function sumarColumna(datos, aliasColumna) {
 function extraerDatosTR(datosJSON) {
     let nuevosTR = {};
     datosJSON.forEach(fila => {
-        // En tu archivo, las columnas pueden no tener nombre en la cabecera (suele llamarse 'Etiquetas de fila')
-        // Buscamos cualquier valor que parezca un estado (ej: MAYÚSCULAS) y el número que le sigue.
         const valores = Object.values(fila);
         const estado = String(valores[0]).trim();
         const cantidad = Number(valores[1]) || 0;
@@ -370,4 +368,74 @@ function extraerDatosTR(datosJSON) {
         }
     });
     return nuevosTR;
+}
+
+// --------------------------------------------------------
+// LÓGICA DEL HISTORIAL (NUEVO)
+// --------------------------------------------------------
+function guardarEnHistorial(fecha, trData, opsData) {
+    try {
+        let historial = JSON.parse(localStorage.getItem(HISTORY_KEY)) || [];
+        // Agregar al principio de la lista
+        historial.unshift({ id: Date.now(), fecha, trData, opsData });
+        
+        // Límite de seguridad: Guardar solo los últimos 15 reportes para no saturar memoria
+        if (historial.length > 15) historial.pop();
+        
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(historial));
+    } catch (e) { console.warn("Error guardando historial:", e); }
+}
+
+function abrirModalHistorial() {
+    document.getElementById('modalHistorial').classList.remove('hidden');
+    renderizarHistorial();
+}
+
+function cerrarModalHistorial() {
+    document.getElementById('modalHistorial').classList.add('hidden');
+}
+
+function renderizarHistorial() {
+    const contenedor = document.getElementById('listaHistorial');
+    let historial = JSON.parse(localStorage.getItem(HISTORY_KEY)) || [];
+    
+    if (historial.length === 0) {
+        contenedor.innerHTML = '<p class="text-gray-500 text-sm text-center py-6">No hay reportes anteriores guardados.</p>';
+        return;
+    }
+
+    contenedor.innerHTML = historial.map(item => `
+        <div onclick="cargarReporteHistorico(${item.id})" class="bg-dark-900 border border-dark-700 p-3 rounded-lg flex justify-between items-center hover:border-blue-500/50 hover:bg-dark-800 transition-all cursor-pointer group">
+            <span class="text-sm font-medium text-gray-300 group-hover:text-blue-400 transition-colors">
+                <i data-lucide="file-bar-chart-2" class="w-4 h-4 inline-block mr-2 mb-0.5 text-gray-500 group-hover:text-blue-400"></i>
+                ${item.fecha}
+            </span>
+            <span class="text-xs bg-dark-700 text-gray-400 px-2 py-1 rounded group-hover:bg-blue-500/20 group-hover:text-blue-400 transition-colors">Cargar</span>
+        </div>
+    `).join('');
+    
+    // Re-renderizar íconos del modal
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+function cargarReporteHistorico(id) {
+    let historial = JSON.parse(localStorage.getItem(HISTORY_KEY)) || [];
+    const reporte = historial.find(item => item.id === id);
+    
+    if (reporte) {
+        currentTRData = reporte.trData;
+        currentOpsData = reporte.opsData;
+        currentFechaReporte = reporte.fecha;
+        document.getElementById('fechaReporte').innerText = currentFechaReporte;
+        
+        ActualizarDashboard(currentTRData, currentOpsData.abast, currentOpsData.almac, currentOpsData.pick, currentOpsData.ctrl, currentOpsData.desp);
+        cerrarModalHistorial();
+    }
+}
+
+function limpiarHistorial() {
+    if(confirm('¿Estás seguro de que quieres borrar todos los reportes anteriores? Esta acción no se puede deshacer.')) {
+        localStorage.removeItem(HISTORY_KEY);
+        renderizarHistorial();
+    }
 }
