@@ -2,12 +2,11 @@
 // CONFIG
 // --------------------------------------------------------
 const LOCALE = 'es-AR';
-const STORAGE_KEY = 'dexterDashboard_v2'; // Actualizado para evitar conflictos con caché vieja
+const STORAGE_KEY = 'dexterDashboard_v2'; 
 const HISTORY_KEY = 'dexterDashboard_history_v2';
 
 const DOUGHNUT_COLORS = ['#e52329', '#f59e0b', '#27272a', '#52525b', '#10b981', '#3f3f46'];
 
-// Alias posibles para cada columna del reporte operativo (incluyendo Despacho)
 const COLUMNAS_OPS = {
     abastecimiento: ['Cantidad ingresada', 'cantidad ingresada'],
     almacenamiento: ['Cantidad guardada', 'cantidad guardada'],
@@ -16,7 +15,6 @@ const COLUMNAS_OPS = {
     despacho: ['Cantidad despachada', 'cantidad despachada', 'despacho'],
 };
 
-// Colores de badge para estados
 const BADGE_COLORS = {
     DISPATCHED: 'bg-brand-success/20 text-brand-success',
     CANCELLED: 'bg-brand-danger/20 text-brand-danger',
@@ -32,11 +30,9 @@ const BADGE_COLORS = {
     FINALIZED: 'bg-brand-success/20 text-brand-success',
 };
 
-// Variables Globales para almacenar las instancias de los gráficos
 let barChartInstance = null;
 let doughnutChartInstance = null;
 
-// Datos Iniciales (Despacho en 0 por defecto para evitar valores erróneos)
 let currentTRData = {
     "DISPATCHED": 0, "CREATED": 27669, "IN_BRANCH_POSITION": 5940, "PRE_DISPATCH": 4914,
     "CONTROL": 1895, "PACKING": 1843, "CONFERENCE": 1356, "CANCELLED": 646,
@@ -45,18 +41,17 @@ let currentTRData = {
 let currentOpsData = { abast: 12762, almac: 17936, pick: 12777, ctrl: 13436, desp: 0 };
 let currentFechaReporte = "Reporte Inicial (Sin Carga)";
 
-// Inicializar el Dashboard al cargar la página
 document.addEventListener('DOMContentLoaded', () => {
     if (typeof lucide !== 'undefined') lucide.createIcons();
     ConfigurarGraficosBase();
 
-    // Intentar recuperar el último estado guardado en este navegador
     const guardado = cargarEstadoGuardado();
     if (guardado) {
         currentTRData = guardado.trData;
         currentOpsData = guardado.opsData;
         currentFechaReporte = guardado.fecha;
-        document.getElementById('fechaReporte').innerText = currentFechaReporte;
+        const elFecha = document.getElementById('fechaReporte');
+        if (elFecha) elFecha.innerText = currentFechaReporte;
     }
 
     ActualizarDashboard(
@@ -88,7 +83,6 @@ function cargarEstadoGuardado() {
         if (!raw) return null;
         const parsed = JSON.parse(raw);
         if (!parsed.trData || !parsed.opsData) return null;
-        // Evitar cargar por accidente el valor viejo de 298880 si estuviera cacheado
         if (parsed.opsData.desp === 298880) parsed.opsData.desp = 0;
         return parsed;
     } catch (e) {
@@ -109,24 +103,20 @@ function ConfigurarGraficosBase() {
 }
 
 function ActualizarDashboard(trData, abast, almac, pick, ctrl, desp) {
-    // 0. Persistir el estado actual
     currentOpsData = { abast, almac, pick, ctrl, desp };
     guardarEstado();
 
-    // 1. Actualizar Tarjetas Operativas
     document.getElementById('cardAbastecimiento').innerText = abast.toLocaleString(LOCALE);
     document.getElementById('cardAlmacenamiento').innerText = almac.toLocaleString(LOCALE);
     document.getElementById('cardPicking').innerText = pick.toLocaleString(LOCALE);
     document.getElementById('cardControl').innerText = ctrl.toLocaleString(LOCALE);
     document.getElementById('cardDespacho').innerText = desp.toLocaleString(LOCALE);
 
-    // 2. Preparar Datos TR (ordenados de mayor a menor volumen)
     const sortedTR = Object.entries(trData).sort((a, b) => b[1] - a[1]);
     const labels = sortedTR.map(item => item[0].replace(/_/g, ' '));
     const dataValues = sortedTR.map(item => item[1]);
     const totalTRs = dataValues.reduce((acc, val) => acc + val, 0);
 
-    // 3. Actualizar Tabla
     const tbody = document.getElementById('trTableBody');
     tbody.innerHTML = '';
 
@@ -142,7 +132,6 @@ function ActualizarDashboard(trData, abast, almac, pick, ctrl, desp) {
             </tr>`;
     });
 
-    // 4. Actualizar Gráfico de Barras
     if (barChartInstance) barChartInstance.destroy();
     barChartInstance = new Chart(document.getElementById('trBarChart'), {
         type: 'bar',
@@ -167,7 +156,6 @@ function ActualizarDashboard(trData, abast, almac, pick, ctrl, desp) {
         }
     });
 
-    // 5. Actualizar Gráfico de Dona
     const top5Labels = labels.slice(0, 5);
     const top5Values = dataValues.slice(0, 5);
     const restoValor = dataValues.slice(5).reduce((acc, v) => acc + v, 0);
@@ -198,7 +186,6 @@ function ActualizarDashboard(trData, abast, almac, pick, ctrl, desp) {
         }
     });
 
-    // Leyenda manual debajo de la dona
     const legendEl = document.getElementById('doughnutLegend');
     if (legendEl) {
         legendEl.innerHTML = doughnutLabels.map((label, i) => {
@@ -246,8 +233,10 @@ async function procesarArchivos() {
     const btn = document.getElementById('btnProcesar');
     const icon = document.getElementById('spinnerIcon');
     btn.classList.add('opacity-50', 'cursor-not-allowed');
-    icon.classList.remove('hidden');
-    icon.classList.add('animate-spin');
+    if (icon) {
+        icon.classList.remove('hidden');
+        icon.classList.add('animate-spin');
+    }
 
     const avisos = [];
 
@@ -258,7 +247,6 @@ async function procesarArchivos() {
         let nuevosCtrl = currentOpsData.ctrl;
         let nuevosDesp = currentOpsData.desp;
 
-        // 1. Leer Archivo Operativo (Cruzado directamente aquí)
         if (fileOps) {
             const dataOps = await leerExcel(fileOps);
             if (dataOps.length === 0) {
@@ -268,7 +256,7 @@ async function procesarArchivos() {
                 const resAlmac = sumarColumna(dataOps, COLUMNAS_OPS.almacenamiento);
                 const resPick = sumarColumna(dataOps, COLUMNAS_OPS.picking);
                 const resCtrl = sumarColumna(dataOps, COLUMNAS_OPS.control);
-                const resDesp = sumarColumna(dataOps, COLUMNAS_OPS.despacho); // Cruce directo con Despacho
+                const resDesp = sumarColumna(dataOps, COLUMNAS_OPS.despacho);
 
                 nuevosAbast = resAbast.total;
                 nuevosAlmac = resAlmac.total;
@@ -276,7 +264,7 @@ async function procesarArchivos() {
                 nuevosCtrl = resCtrl.total;
 
                 if (resDesp.encontrada) {
-                    nuevosDesp = resDesp.total; // Toma el despacho directamente del Excel operativo
+                    nuevosDesp = resDesp.total;
                 }
 
                 if (!resAbast.encontrada) avisos.push('No se encontró "Cantidad ingresada".');
@@ -287,7 +275,6 @@ async function procesarArchivos() {
             }
         }
 
-        // 2. Leer Archivo de TR's (Si se proporciona)
         if (fileTR) {
             const dataTR = await leerExcel(fileTR);
             const nuevosTR = extraerDatosTR(dataTR);
@@ -295,16 +282,15 @@ async function procesarArchivos() {
                 avisos.push('No se pudieron extraer estados válidos del archivo de TRs.');
             } else {
                 currentTRData = nuevosTR;
-                // Si no se cargó archivo operativo pero viene DISPATCHED en TRs, actualizar despacho opcionalmente
                 if (!fileOps && Object.prototype.hasOwnProperty.call(currentTRData, "DISPATCHED")) {
                     nuevosDesp = currentTRData["DISPATCHED"];
                 }
             }
         }
 
-        // 3. Actualizar fecha, historial y dashboard
         currentFechaReporte = "Carga: " + new Date().toLocaleString(LOCALE, {day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'});
-        document.getElementById('fechaReporte').innerText = currentFechaReporte;
+        const elFecha = document.getElementById('fechaReporte');
+        if (elFecha) elFecha.innerText = currentFechaReporte;
         
         guardarEnHistorial(currentFechaReporte, currentTRData, { abast: nuevosAbast, almac: nuevosAlmac, pick: nuevosPick, ctrl: nuevosCtrl, desp: nuevosDesp });
         
@@ -318,8 +304,10 @@ async function procesarArchivos() {
         alert("Hubo un error leyendo los archivos. Asegurate de que sean los reportes correctos.");
     } finally {
         btn.classList.remove('opacity-50', 'cursor-not-allowed');
-        icon.classList.add('hidden');
-        icon.classList.remove('animate-spin');
+        if (icon) {
+            icon.classList.add('hidden');
+            icon.classList.remove('animate-spin');
+        }
     }
 }
 
@@ -346,7 +334,7 @@ function leerExcel(file) {
 }
 
 function sumarColumna(datos, aliasColumna) {
-    if (datos.length === 0) return { total: 0, encontrada: false };
+    if (!datos || datos.length === 0) return { total: 0, encontrada: false };
 
     const columnasReales = Object.keys(datos[0]);
     const nombreReal = columnasReales.find(col =>
@@ -365,8 +353,12 @@ function sumarColumna(datos, aliasColumna) {
 
 function extraerDatosTR(datosJSON) {
     let nuevosTR = {};
+    if (!datosJSON || datosJSON.length === 0) return nuevosTR;
+
     datosJSON.forEach(fila => {
         const valores = Object.values(fila);
+        if (valores.length < 2) return;
+        
         const estado = String(valores[0]).trim();
         const cantidad = Number(valores[1]) || 0;
 
@@ -390,16 +382,20 @@ function guardarEnHistorial(fecha, trData, opsData) {
 }
 
 function abrirModalHistorial() {
-    document.getElementById('modalHistorial').classList.remove('hidden');
+    const modal = document.getElementById('modalHistorial');
+    if (modal) modal.classList.remove('hidden');
     renderizarHistorial();
 }
 
 function cerrarModalHistorial() {
-    document.getElementById('modalHistorial').classList.add('hidden');
+    const modal = document.getElementById('modalHistorial');
+    if (modal) modal.classList.add('hidden');
 }
 
 function renderizarHistorial() {
     const contenedor = document.getElementById('listaHistorial');
+    if (!contenedor) return;
+
     let historial = JSON.parse(localStorage.getItem(HISTORY_KEY)) || [];
     
     if (historial.length === 0) {
@@ -428,7 +424,8 @@ function cargarReporteHistorico(id) {
         currentTRData = reporte.trData;
         currentOpsData = reporte.opsData;
         currentFechaReporte = reporte.fecha;
-        document.getElementById('fechaReporte').innerText = currentFechaReporte;
+        const elFecha = document.getElementById('fechaReporte');
+        if (elFecha) elFecha.innerText = currentFechaReporte;
         
         ActualizarDashboard(currentTRData, currentOpsData.abast, currentOpsData.almac, currentOpsData.pick, currentOpsData.ctrl, currentOpsData.desp);
         cerrarModalHistorial();
@@ -440,5 +437,4 @@ function limpiarHistorial() {
         localStorage.removeItem(HISTORY_KEY);
         renderizarHistorial();
     }
-} 
-   
+}
