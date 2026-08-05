@@ -54,22 +54,26 @@ function switchTab(tab) {
     const btnDash = document.getElementById('btnTabDashboard');
     const btnDB = document.getElementById('btnTabDB');
 
+    // Clases CSS actualizadas para un look más moderno
+    const activeClass = "px-5 py-1.5 text-sm rounded-lg bg-dark-700/80 text-white font-medium shadow-sm border border-dark-600/50 transition-all";
+    const inactiveClass = "px-5 py-1.5 text-sm rounded-lg text-gray-400 hover:text-white hover:bg-dark-700/50 transition-all border border-transparent";
+
     if (tab === 'dashboard') {
         viewDash.classList.remove('hidden');
         viewDash.classList.add('block');
         viewDB.classList.add('hidden');
         viewDB.classList.remove('block');
 
-        btnDash.className = "px-4 py-1.5 text-sm rounded-md bg-dark-700 text-white font-medium shadow transition-all";
-        btnDB.className = "px-4 py-1.5 text-sm rounded-md text-gray-400 hover:text-white hover:bg-dark-700 transition-all";
+        btnDash.className = activeClass;
+        btnDB.className = inactiveClass;
     } else {
         viewDB.classList.remove('hidden');
         viewDB.classList.add('block');
         viewDash.classList.add('hidden');
         viewDash.classList.remove('block');
 
-        btnDB.className = "px-4 py-1.5 text-sm rounded-md bg-dark-700 text-white font-medium shadow transition-all";
-        btnDash.className = "px-4 py-1.5 text-sm rounded-md text-gray-400 hover:text-white hover:bg-dark-700 transition-all";
+        btnDB.className = activeClass;
+        btnDash.className = inactiveClass;
     }
 }
 

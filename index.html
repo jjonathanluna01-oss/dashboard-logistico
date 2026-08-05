@@ -37,11 +37,14 @@
             </div>
             
             <!-- PESTAÑAS (TABS) -->
-            <div class="hidden sm:flex ml-4 bg-dark-800 p-1 rounded-lg border border-dark-700">
-                <button id="btnTabDashboard" onclick="switchTab('dashboard')" class="px-4 py-1.5 text-sm rounded-md bg-dark-700 text-white font-medium shadow transition-all">Dashboard</button>
-                <button id="btnTabDB" onclick="switchTab('db')" class="px-4 py-1.5 text-sm rounded-md text-gray-400 hover:text-white hover:bg-dark-700 transition-all">DB (Eficiencia)</button>
+            <div class="hidden sm:flex ml-6 bg-dark-800/80 p-1 rounded-xl border border-dark-700 backdrop-blur-sm">
+                <button id="btnTabDashboard" onclick="switchTab('dashboard')" class="px-5 py-1.5 text-sm rounded-lg bg-dark-700/80 text-white font-medium shadow-sm border border-dark-600/50 transition-all">
+                    Dashboard
+                </button>
+                <button id="btnTabDB" onclick="switchTab('db')" class="px-5 py-1.5 text-sm rounded-lg text-gray-400 hover:text-white hover:bg-dark-700/50 transition-all border border-transparent">
+                    DB
+                </button>
             </div>
-        </div>
         <div class="flex items-center gap-3">
             <button onclick="abrirModalHistorial()" class="glass-panel px-4 py-2 rounded-full hidden sm:flex items-center gap-2 text-sm text-gray-300 hover:text-white hover:bg-dark-800 transition-colors border border-transparent hover:border-gray-600">
                 <i data-lucide="calendar" class="w-4 h-4 text-blue-400"></i>
