@@ -440,4 +440,5 @@ function limpiarHistorial() {
         localStorage.removeItem(HISTORY_KEY);
         renderizarHistorial();
     }
-}
+} 
+   
