@@ -2,21 +2,21 @@
 // CONFIG
 // --------------------------------------------------------
 const LOCALE = 'es-AR';
-const STORAGE_KEY = 'dexterDashboard_v1';
-const HISTORY_KEY = 'dexterDashboard_history_v1'; // NUEVO: Llave para el historial
+const STORAGE_KEY = 'dexterDashboard_v2'; // Actualizado para evitar conflictos con caché vieja
+const HISTORY_KEY = 'dexterDashboard_history_v2';
 
 const DOUGHNUT_COLORS = ['#e52329', '#f59e0b', '#27272a', '#52525b', '#10b981', '#3f3f46'];
 
-// Alias posibles para cada columna del reporte operativo (por si cambian mayúsculas/tildes/espacios)
+// Alias posibles para cada columna del reporte operativo (incluyendo Despacho)
 const COLUMNAS_OPS = {
     abastecimiento: ['Cantidad ingresada', 'cantidad ingresada'],
     almacenamiento: ['Cantidad guardada', 'cantidad guardada'],
     picking: ['Cantidad pickeada', 'cantidad pickeada'],
     control: ['Cantidad controlada', 'cantidad controlada'],
-    despacho: ['Cantidad despachada', 'cantidad despachada'], // <- NUEVO: Agrega aquí el nombre de la columna en tu Excel de despacho
+    despacho: ['Cantidad despachada', 'cantidad despachada', 'despacho'],
 };
 
-// Colores de badge para más estados (fallback gris si no está mapeado)
+// Colores de badge para estados
 const BADGE_COLORS = {
     DISPATCHED: 'bg-brand-success/20 text-brand-success',
     CANCELLED: 'bg-brand-danger/20 text-brand-danger',
@@ -36,14 +36,14 @@ const BADGE_COLORS = {
 let barChartInstance = null;
 let doughnutChartInstance = null;
 
-// Datos Iniciales (Por defecto)
+// Datos Iniciales (Despacho en 0 por defecto para evitar valores erróneos)
 let currentTRData = {
-    "DISPATCHED": 298880, "CREATED": 27669, "IN_BRANCH_POSITION": 5940, "PRE_DISPATCH": 4914,
+    "DISPATCHED": 0, "CREATED": 27669, "IN_BRANCH_POSITION": 5940, "PRE_DISPATCH": 4914,
     "CONTROL": 1895, "PACKING": 1843, "CONFERENCE": 1356, "CANCELLED": 646,
     "PAUSED_WITH_DIFFERENCES": 420, "AWAITING_DELIVERY_NOTE": 381, "AWAITING_SHIPPING_LABEL": 306, "FINALIZED": 171
 };
-let currentOpsData = { abast: 12762, almac: 17936, pick: 12777, ctrl: 13436, desp: 298880 };
-let currentFechaReporte = "Reporte: 01 Jul - 03 Ago 2026";
+let currentOpsData = { abast: 12762, almac: 17936, pick: 12777, ctrl: 13436, desp: 0 };
+let currentFechaReporte = "Reporte Inicial (Sin Carga)";
 
 // Inicializar el Dashboard al cargar la página
 document.addEventListener('DOMContentLoaded', () => {
@@ -88,6 +88,8 @@ function cargarEstadoGuardado() {
         if (!raw) return null;
         const parsed = JSON.parse(raw);
         if (!parsed.trData || !parsed.opsData) return null;
+        // Evitar cargar por accidente el valor viejo de 298880 si estuviera cacheado
+        if (parsed.opsData.desp === 298880) parsed.opsData.desp = 0;
         return parsed;
     } catch (e) {
         console.warn('No se pudo leer el estado guardado:', e);
@@ -107,11 +109,11 @@ function ConfigurarGraficosBase() {
 }
 
 function ActualizarDashboard(trData, abast, almac, pick, ctrl, desp) {
-    // 0. Persistir el estado actual (para sobrevivir a un refresh)
+    // 0. Persistir el estado actual
     currentOpsData = { abast, almac, pick, ctrl, desp };
     guardarEstado();
 
-    // 1. Actualizar Tarjetas Operativas (por ID, no por selector de clase de borde)
+    // 1. Actualizar Tarjetas Operativas
     document.getElementById('cardAbastecimiento').innerText = abast.toLocaleString(LOCALE);
     document.getElementById('cardAlmacenamiento').innerText = almac.toLocaleString(LOCALE);
     document.getElementById('cardPicking').innerText = pick.toLocaleString(LOCALE);
@@ -250,10 +252,13 @@ async function procesarArchivos() {
     const avisos = [];
 
     try {
-        let { abast: nuevosAbast, almac: nuevosAlmac, pick: nuevosPick, ctrl: nuevosCtrl } = currentOpsData;
+        let nuevosAbast = currentOpsData.abast;
+        let nuevosAlmac = currentOpsData.almac;
+        let nuevosPick = currentOpsData.pick;
+        let nuevosCtrl = currentOpsData.ctrl;
         let nuevosDesp = currentOpsData.desp;
 
-        // 1. Leer Archivo Operativo
+        // 1. Leer Archivo Operativo (Cruzado directamente aquí)
         if (fileOps) {
             const dataOps = await leerExcel(fileOps);
             if (dataOps.length === 0) {
@@ -263,27 +268,26 @@ async function procesarArchivos() {
                 const resAlmac = sumarColumna(dataOps, COLUMNAS_OPS.almacenamiento);
                 const resPick = sumarColumna(dataOps, COLUMNAS_OPS.picking);
                 const resCtrl = sumarColumna(dataOps, COLUMNAS_OPS.control);
-                const resDesp = sumarColumna(dataOps, COLUMNAS_OPS.despacho); // <- NUEVO
+                const resDesp = sumarColumna(dataOps, COLUMNAS_OPS.despacho); // Cruce directo con Despacho
 
                 nuevosAbast = resAbast.total;
                 nuevosAlmac = resAlmac.total;
                 nuevosPick = resPick.total;
                 nuevosCtrl = resCtrl.total;
-                
-                // Si el Excel operativo trae la columna de despacho, la actualiza directamente de ahí:
+
                 if (resDesp.encontrada) {
-                    nuevosDesp = resDesp.total;
+                    nuevosDesp = resDesp.total; // Toma el despacho directamente del Excel operativo
                 }
 
-                if (!resAbast.encontrada) avisos.push('No se encontró la columna "Cantidad ingresada" (Abastecimiento quedó sin actualizar).');
-                if (!resAlmac.encontrada) avisos.push('No se encontró la columna "Cantidad guardada" (Almacenamiento quedó sin actualizar).');
-                if (!resPick.encontrada) avisos.push('No se encontró la columna "Cantidad pickeada" (Picking quedó sin actualizar).');
-                if (!resCtrl.encontrada) avisos.push('No se encontró la columna "Cantidad controlada" (Control quedó sin actualizar).');
-                if (!resDesp.encontrada && !fileTR) avisos.push('No se encontró la columna de despacho en el Excel operativo.');
+                if (!resAbast.encontrada) avisos.push('No se encontró "Cantidad ingresada".');
+                if (!resAlmac.encontrada) avisos.push('No se encontró "Cantidad guardada".');
+                if (!resPick.encontrada) avisos.push('No se encontró "Cantidad pickeada".');
+                if (!resCtrl.encontrada) avisos.push('No se encontró "Cantidad controlada".');
+                if (!resDesp.encontrada) avisos.push('No se encontró columna de Despacho en el Excel operativo.');
             }
         }
 
-        // 2. Leer Archivo de TR's
+        // 2. Leer Archivo de TR's (Si se proporciona)
         if (fileTR) {
             const dataTR = await leerExcel(fileTR);
             const nuevosTR = extraerDatosTR(dataTR);
@@ -291,22 +295,17 @@ async function procesarArchivos() {
                 avisos.push('No se pudieron extraer estados válidos del archivo de TRs.');
             } else {
                 currentTRData = nuevosTR;
+                // Si no se cargó archivo operativo pero viene DISPATCHED en TRs, actualizar despacho opcionalmente
+                if (!fileOps && Object.prototype.hasOwnProperty.call(currentTRData, "DISPATCHED")) {
+                    nuevosDesp = currentTRData["DISPATCHED"];
+                }
             }
         }
 
-        // 3. Extraer el despacho desde los datos de TR's (si existe la clave DISPATCHED)
-        if (Object.prototype.hasOwnProperty.call(currentTRData, "DISPATCHED")) {
-            nuevosDesp = currentTRData["DISPATCHED"];
-        } else if (fileTR) {
-            nuevosDesp = 0;
-            avisos.push('No se encontró el estado "DISPATCHED" en el archivo de TRs; Despacho quedó en 0.');
-        }
-
-        // 4. Actualizar visualmente y guardar en el historial
+        // 3. Actualizar fecha, historial y dashboard
         currentFechaReporte = "Carga: " + new Date().toLocaleString(LOCALE, {day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'});
         document.getElementById('fechaReporte').innerText = currentFechaReporte;
         
-        // Guardar esta foto del momento (snapshot) en el historial antes de actualizar
         guardarEnHistorial(currentFechaReporte, currentTRData, { abast: nuevosAbast, almac: nuevosAlmac, pick: nuevosPick, ctrl: nuevosCtrl, desp: nuevosDesp });
         
         ActualizarDashboard(currentTRData, nuevosAbast, nuevosAlmac, nuevosPick, nuevosCtrl, nuevosDesp);
@@ -379,17 +378,13 @@ function extraerDatosTR(datosJSON) {
 }
 
 // --------------------------------------------------------
-// LÓGICA DEL HISTORIAL (NUEVO)
+// LÓGICA DEL HISTORIAL
 // --------------------------------------------------------
 function guardarEnHistorial(fecha, trData, opsData) {
     try {
         let historial = JSON.parse(localStorage.getItem(HISTORY_KEY)) || [];
-        // Agregar al principio de la lista
         historial.unshift({ id: Date.now(), fecha, trData, opsData });
-        
-        // Límite de seguridad: Guardar solo los últimos 15 reportes para no saturar memoria
         if (historial.length > 15) historial.pop();
-        
         localStorage.setItem(HISTORY_KEY, JSON.stringify(historial));
     } catch (e) { console.warn("Error guardando historial:", e); }
 }
@@ -422,7 +417,6 @@ function renderizarHistorial() {
         </div>
     `).join('');
     
-    // Re-renderizar íconos del modal
     if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
@@ -442,7 +436,7 @@ function cargarReporteHistorico(id) {
 }
 
 function limpiarHistorial() {
-    if(confirm('¿Estás seguro de que quieres borrar todos los reportes anteriores? Esta acción no se puede deshacer.')) {
+    if(confirm('¿Estás seguro de que quieres borrar todos los reportes anteriores?')) {
         localStorage.removeItem(HISTORY_KEY);
         renderizarHistorial();
     }
