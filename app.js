@@ -13,6 +13,7 @@ const COLUMNAS_OPS = {
     almacenamiento: ['Cantidad guardada', 'cantidad guardada'],
     picking: ['Cantidad pickeada', 'cantidad pickeada'],
     control: ['Cantidad controlada', 'cantidad controlada'],
+    despacho: ['Cantidad despachada', 'cantidad despachada'], // <- NUEVO: Agrega aquí el nombre de la columna en tu Excel de despacho
 };
 
 // Colores de badge para más estados (fallback gris si no está mapeado)
@@ -262,16 +263,23 @@ async function procesarArchivos() {
                 const resAlmac = sumarColumna(dataOps, COLUMNAS_OPS.almacenamiento);
                 const resPick = sumarColumna(dataOps, COLUMNAS_OPS.picking);
                 const resCtrl = sumarColumna(dataOps, COLUMNAS_OPS.control);
+                const resDesp = sumarColumna(dataOps, COLUMNAS_OPS.despacho); // <- NUEVO
 
                 nuevosAbast = resAbast.total;
                 nuevosAlmac = resAlmac.total;
                 nuevosPick = resPick.total;
                 nuevosCtrl = resCtrl.total;
+                
+                // Si el Excel operativo trae la columna de despacho, la actualiza directamente de ahí:
+                if (resDesp.encontrada) {
+                    nuevosDesp = resDesp.total;
+                }
 
                 if (!resAbast.encontrada) avisos.push('No se encontró la columna "Cantidad ingresada" (Abastecimiento quedó sin actualizar).');
                 if (!resAlmac.encontrada) avisos.push('No se encontró la columna "Cantidad guardada" (Almacenamiento quedó sin actualizar).');
                 if (!resPick.encontrada) avisos.push('No se encontró la columna "Cantidad pickeada" (Picking quedó sin actualizar).');
                 if (!resCtrl.encontrada) avisos.push('No se encontró la columna "Cantidad controlada" (Control quedó sin actualizar).');
+                if (!resDesp.encontrada && !fileTR) avisos.push('No se encontró la columna de despacho en el Excel operativo.');
             }
         }
 
