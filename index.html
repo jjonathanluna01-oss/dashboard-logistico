@@ -29,24 +29,13 @@
 
 <body class="min-h-screen p-4 sm:p-6 lg:p-8 font-sans">
 
-    <!-- Header -->
-    <header class="max-w-7xl mx-auto mb-8 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+  <!-- Header -->
+    <header class="max-w-7xl mx-auto mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         
-        <!-- Lado Izquierdo: Logo y Pestañas -->
+        <!-- Lado Izquierdo: Logo Grupo Dexter -->
         <div class="flex items-center gap-6">
-            <!-- Logo Grupo Dexter -->
             <div class="bg-[#e52329] px-3 py-1 rounded shadow-lg shadow-red-900/20">
                 <span class="italic font-black text-white text-2xl tracking-wider pr-1">Grupo Dexter</span>
-            </div>
-            
-            <!-- Pestañas (Tabs) -->
-            <div class="hidden sm:flex bg-dark-800/80 p-1 rounded-xl border border-dark-700 backdrop-blur-sm">
-                <button id="btnTabDashboard" onclick="switchTab('dashboard')" class="px-5 py-1.5 text-sm rounded-lg bg-dark-700/80 text-white font-medium shadow-sm border border-dark-600/50 transition-all">
-                    Dashboard
-                </button>
-                <button id="btnTabDB" onclick="switchTab('db')" class="px-5 py-1.5 text-sm rounded-lg text-gray-400 hover:text-white hover:bg-dark-700/50 transition-all border border-transparent">
-                    DB
-                </button>
             </div>
         </div>
 
@@ -69,6 +58,16 @@
 
     <main class="max-w-7xl mx-auto">
         
+        <!-- PESTAÑAS (TABS) REUBICADAS AQUÍ -->
+        <div class="flex bg-dark-800/80 p-1 rounded-xl border border-dark-700 backdrop-blur-sm w-fit mb-8">
+            <button id="btnTabDashboard" onclick="switchTab('dashboard')" class="px-5 py-1.5 text-sm rounded-lg bg-dark-700/80 text-white font-medium shadow-sm border border-dark-600/50 transition-all">
+                Dashboard
+            </button>
+            <button id="btnTabDB" onclick="switchTab('db')" class="px-5 py-1.5 text-sm rounded-lg text-gray-400 hover:text-white hover:bg-dark-700/50 transition-all border border-transparent">
+                DB
+            </button>
+        </div>
+
         <!-- ========================================== -->
         <!-- VISTA 1: DASHBOARD (Métricas y Gráficos)   -->
         <!-- ========================================== -->
