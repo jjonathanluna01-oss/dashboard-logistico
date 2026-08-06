@@ -23,15 +23,16 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 </head>
 
 <body class="min-h-screen p-4 sm:p-6 lg:p-8 font-sans">
 
-<!-- Header -->
+    <!-- Header -->
     <header class="max-w-7xl mx-auto mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        
+
         <!-- Lado Izquierdo: Logo Grupo Dexter -->
         <div class="flex items-center gap-6">
             <div class="bg-[#e52329] px-3 py-1 rounded shadow-lg shadow-red-900/20">
@@ -41,29 +42,34 @@
 
         <!-- Lado Derecho: Fechas, Carga de Datos y Notificaciones -->
         <div class="flex items-center gap-3 sm:gap-4">
-            
+
             <!-- 1. Botón Fechas (Historial) -->
-            <button onclick="abrirModalHistorial()" class="glass-panel px-4 py-2 rounded-xl hidden sm:flex items-center gap-2 text-sm text-gray-300 hover:text-white hover:bg-dark-800 transition-colors border border-transparent hover:border-gray-600">
+            <button onclick="abrirModalHistorial()"
+                class="glass-panel px-4 py-2 rounded-xl hidden sm:flex items-center gap-2 text-sm text-gray-300 hover:text-white hover:bg-dark-800 transition-colors border border-transparent hover:border-gray-600">
                 <i data-lucide="calendar" class="w-4 h-4 text-blue-400"></i>
                 <span id="fechaReporte">Reporte Inicial</span>
             </button>
-            
+
             <!-- 2. Botón Cargar Datos -->
-            <button onclick="abrirModalUpdate()" class="bg-brand-accent hover:bg-red-700 text-white text-sm px-5 py-2 rounded-xl flex items-center gap-2 transition-colors font-medium shadow-lg shadow-red-900/30">
+            <button onclick="abrirModalUpdate()"
+                class="bg-brand-accent hover:bg-red-700 text-white text-sm px-5 py-2 rounded-xl flex items-center gap-2 transition-colors font-medium shadow-lg shadow-red-900/30">
                 <i data-lucide="upload" class="w-4 h-4"></i>
                 Actualizar Datos
             </button>
 
             <!-- 3. 🔔 BOTÓN DE NOTIFICACIONES Y PANEL (Al final de todo) -->
             <div class="relative">
-                <button onclick="toggleCentroNotificaciones()" class="glass-panel p-2.5 rounded-xl flex items-center justify-center text-gray-300 hover:text-white hover:bg-dark-800 transition-colors border border-transparent hover:border-gray-600 relative">
+                <button onclick="toggleCentroNotificaciones()"
+                    class="glass-panel p-2.5 rounded-xl flex items-center justify-center text-gray-300 hover:text-white hover:bg-dark-800 transition-colors border border-transparent hover:border-gray-600 relative">
                     <i data-lucide="bell" class="w-5 h-5 text-brand-warning"></i>
                     <!-- Puntito rojo indicador de notificaciones activas -->
-                    <span id="notifBadge" class="absolute top-2 right-2 w-2 h-2 bg-brand-accent rounded-full hidden"></span>
+                    <span id="notifBadge"
+                        class="absolute top-2 right-2 w-2 h-2 bg-brand-accent rounded-full hidden"></span>
                 </button>
 
                 <!-- PANEL DESPLEGABLE -->
-                <div id="panelNotificaciones" class="hidden absolute right-0 mt-3 w-80 sm:w-96 glass-panel rounded-2xl p-4 border border-dark-700 shadow-2xl z-[60] text-left">
+                <div id="panelNotificaciones"
+                    class="hidden absolute right-0 mt-3 w-80 sm:w-96 glass-panel rounded-2xl p-4 border border-dark-700 shadow-2xl z-[60] text-left">
                     <div class="flex justify-between items-center pb-3 border-b border-dark-700 mb-3">
                         <h4 class="text-white font-bold text-sm flex items-center gap-2">
                             <i data-lucide="bell-ring" class="w-4 h-4 text-brand-warning"></i> Notificaciones
@@ -72,8 +78,10 @@
                             <i data-lucide="x" class="w-4 h-4"></i>
                         </button>
                     </div>
-                    <div id="listaNotificaciones" class="space-y-2.5 max-h-72 overflow-y-auto custom-scrollbar pr-1 text-xs">
-                        <p class="text-gray-500 text-center py-4">No hay notificaciones recientes. Carga un reporte operativo.</p>
+                    <div id="listaNotificaciones"
+                        class="space-y-2.5 max-h-72 overflow-y-auto custom-scrollbar pr-1 text-xs">
+                        <p class="text-gray-500 text-center py-4">No hay notificaciones recientes. Carga un reporte
+                            operativo.</p>
                     </div>
                 </div>
             </div>
@@ -81,13 +89,15 @@
         </div>
     </header>
     <main class="max-w-7xl mx-auto">
-        
+
         <!-- PESTAÑAS (TABS) REUBICADAS AQUÍ -->
         <div class="flex bg-dark-800/80 p-1 rounded-xl border border-dark-700 backdrop-blur-sm w-fit mb-8">
-            <button id="btnTabDashboard" onclick="switchTab('dashboard')" class="px-5 py-1.5 text-sm rounded-lg bg-dark-700/80 text-white font-medium shadow-sm border border-dark-600/50 transition-all">
+            <button id="btnTabDashboard" onclick="switchTab('dashboard')"
+                class="px-5 py-1.5 text-sm rounded-lg bg-dark-700/80 text-white font-medium shadow-sm border border-dark-600/50 transition-all">
                 Dashboard
             </button>
-            <button id="btnTabDB" onclick="switchTab('db')" class="px-5 py-1.5 text-sm rounded-lg text-gray-400 hover:text-white hover:bg-dark-700/50 transition-all border border-transparent">
+            <button id="btnTabDB" onclick="switchTab('db')"
+                class="px-5 py-1.5 text-sm rounded-lg text-gray-400 hover:text-white hover:bg-dark-700/50 transition-all border border-transparent">
                 DB
             </button>
         </div>
@@ -103,37 +113,71 @@
                 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
                     <!-- Tarjetas Operativas -->
                     <div class="glass-panel metric-card rounded-2xl p-5 border-t-2 border-t-brand-warning">
-                        <div class="flex justify-between items-start"><span class="text-gray-400 text-sm font-medium">ABASTECIMIENTO</span><div class="bg-brand-warning/20 p-2 rounded-lg"><i data-lucide="truck" class="w-5 h-5 text-brand-warning"></i></div></div>
-                        <div class="mt-4 flex items-baseline gap-2"><span id="cardAbastecimiento" class="text-3xl font-bold text-white">0</span><span class="text-xs text-gray-500">unidades</span></div>
+                        <div class="flex justify-between items-start"><span
+                                class="text-gray-400 text-sm font-medium">ABASTECIMIENTO</span>
+                            <div class="bg-brand-warning/20 p-2 rounded-lg"><i data-lucide="truck"
+                                    class="w-5 h-5 text-brand-warning"></i></div>
+                        </div>
+                        <div class="mt-4 flex items-baseline gap-2"><span id="cardAbastecimiento"
+                                class="text-3xl font-bold text-white">0</span><span
+                                class="text-xs text-gray-500">unidades</span></div>
                     </div>
                     <div class="glass-panel metric-card rounded-2xl p-5 border-t-2 border-t-brand-accent">
-                        <div class="flex justify-between items-start"><span class="text-gray-400 text-sm font-medium">ALMACENAMIENTO</span><div class="bg-brand-accent/20 p-2 rounded-lg"><i data-lucide="package-plus" class="w-5 h-5 text-brand-accent"></i></div></div>
-                        <div class="mt-4 flex items-baseline gap-2"><span id="cardAlmacenamiento" class="text-3xl font-bold text-white">0</span><span class="text-xs text-gray-500">unidades</span></div>
+                        <div class="flex justify-between items-start"><span
+                                class="text-gray-400 text-sm font-medium">ALMACENAMIENTO</span>
+                            <div class="bg-brand-accent/20 p-2 rounded-lg"><i data-lucide="package-plus"
+                                    class="w-5 h-5 text-brand-accent"></i></div>
+                        </div>
+                        <div class="mt-4 flex items-baseline gap-2"><span id="cardAlmacenamiento"
+                                class="text-3xl font-bold text-white">0</span><span
+                                class="text-xs text-gray-500">unidades</span></div>
                     </div>
                     <div class="glass-panel metric-card rounded-2xl p-5 border-t-2 border-t-brand-purple">
-                        <div class="flex justify-between items-start"><span class="text-gray-400 text-sm font-medium">PICKING</span><div class="bg-brand-purple/20 p-2 rounded-lg"><i data-lucide="mouse-pointer-click" class="w-5 h-5 text-brand-purple"></i></div></div>
-                        <div class="mt-4 flex items-baseline gap-2"><span id="cardPicking" class="text-3xl font-bold text-white">0</span><span class="text-xs text-gray-500">unidades</span></div>
+                        <div class="flex justify-between items-start"><span
+                                class="text-gray-400 text-sm font-medium">PICKING</span>
+                            <div class="bg-brand-purple/20 p-2 rounded-lg"><i data-lucide="mouse-pointer-click"
+                                    class="w-5 h-5 text-brand-purple"></i></div>
+                        </div>
+                        <div class="mt-4 flex items-baseline gap-2"><span id="cardPicking"
+                                class="text-3xl font-bold text-white">0</span><span
+                                class="text-xs text-gray-500">unidades</span></div>
                     </div>
                     <div class="glass-panel metric-card rounded-2xl p-5 border-t-2 border-t-brand-success">
-                        <div class="flex justify-between items-start"><span class="text-gray-400 text-sm font-medium">CONTROL</span><div class="bg-brand-success/20 p-2 rounded-lg"><i data-lucide="clipboard-check" class="w-5 h-5 text-brand-success"></i></div></div>
-                        <div class="mt-4 flex items-baseline gap-2"><span id="cardControl" class="text-3xl font-bold text-white">0</span><span class="text-xs text-gray-500">unidades</span></div>
+                        <div class="flex justify-between items-start"><span
+                                class="text-gray-400 text-sm font-medium">CONTROL</span>
+                            <div class="bg-brand-success/20 p-2 rounded-lg"><i data-lucide="clipboard-check"
+                                    class="w-5 h-5 text-brand-success"></i></div>
+                        </div>
+                        <div class="mt-4 flex items-baseline gap-2"><span id="cardControl"
+                                class="text-3xl font-bold text-white">0</span><span
+                                class="text-xs text-gray-500">unidades</span></div>
                     </div>
                     <div class="glass-panel metric-card rounded-2xl p-5 border-t-2 border-t-blue-500">
-                        <div class="flex justify-between items-start"><span class="text-gray-400 text-sm font-medium">DESPACHO</span><div class="bg-blue-500/20 p-2 rounded-lg"><i data-lucide="send" class="w-5 h-5 text-blue-500"></i></div></div>
-                        <div class="mt-4 flex items-baseline gap-2"><span id="cardDespacho" class="text-3xl font-bold text-white">0</span><span class="text-xs text-gray-500">unidades</span></div>
+                        <div class="flex justify-between items-start"><span
+                                class="text-gray-400 text-sm font-medium">DESPACHO</span>
+                            <div class="bg-blue-500/20 p-2 rounded-lg"><i data-lucide="send"
+                                    class="w-5 h-5 text-blue-500"></i></div>
+                        </div>
+                        <div class="mt-4 flex items-baseline gap-2"><span id="cardDespacho"
+                                class="text-3xl font-bold text-white">0</span><span
+                                class="text-xs text-gray-500">unidades</span></div>
                     </div>
                 </div>
-                <div id="avisoColumnas" class="hidden mt-3 text-xs text-brand-warning bg-brand-warning/10 border border-brand-warning/30 rounded-lg px-3 py-2"></div>
+                <div id="avisoColumnas"
+                    class="hidden mt-3 text-xs text-brand-warning bg-brand-warning/10 border border-brand-warning/30 rounded-lg px-3 py-2">
+                </div>
             </section>
 
             <section>
-                <h2 class="text-sm font-semibold tracking-widest text-gray-400 uppercase mb-4 flex items-center gap-2 mt-8">
+                <h2
+                    class="text-sm font-semibold tracking-widest text-gray-400 uppercase mb-4 flex items-center gap-2 mt-8">
                     <i data-lucide="layers" class="w-4 h-4 text-brand-accent"></i> Distribución de Estados TR's
                 </h2>
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     <div class="glass-panel rounded-2xl p-6 lg:col-span-1 flex flex-col justify-center items-center">
                         <h3 class="text-white font-medium mb-4 w-full text-left">Top 5 Estados (Volumen)</h3>
-                        <div class="relative w-full max-w-[250px] aspect-square"><canvas id="trDoughnutChart"></canvas></div>
+                        <div class="relative w-full max-w-[250px] aspect-square"><canvas id="trDoughnutChart"></canvas>
+                        </div>
                         <ul id="doughnutLegend" class="mt-4 w-full space-y-1.5 text-xs"></ul>
                     </div>
                     <div class="glass-panel rounded-2xl p-6 lg:col-span-2 overflow-hidden flex flex-col">
@@ -141,7 +185,11 @@
                         <div class="overflow-x-auto flex-grow custom-scrollbar">
                             <table class="w-full text-left text-sm whitespace-nowrap">
                                 <thead class="text-gray-400 border-b border-dark-700">
-                                    <tr><th class="pb-3 font-medium">Estado</th><th class="pb-3 font-medium text-right">Cant. Solicitada</th><th class="pb-3 font-medium text-right">% del Total</th></tr>
+                                    <tr>
+                                        <th class="pb-3 font-medium">Estado</th>
+                                        <th class="pb-3 font-medium text-right">Cant. Solicitada</th>
+                                        <th class="pb-3 font-medium text-right">% del Total</th>
+                                    </tr>
                                 </thead>
                                 <tbody id="trTableBody" class="divide-y divide-dark-700"></tbody>
                             </table>
@@ -171,6 +219,7 @@
                             <tr>
                                 <th class="p-3 font-medium rounded-tl-lg">Nombre y Apellido</th>
                                 <th class="p-3 font-medium">Zona Operaria</th>
+                                <th class="p-3 font-medium text-center">Turno</th> <!-- AHORA ESTÁ AL LADO DE ZONA -->
                                 <th class="p-3 font-medium text-right rounded-tr-lg">Total Unidades (Eficiencia)</th>
                             </tr>
                         </thead>
@@ -185,22 +234,28 @@
     </main>
 
     <!-- Modal Carga -->
-    <div id="modalUpdate" class="fixed inset-0 bg-black/80 z-50 hidden flex items-center justify-center p-4 backdrop-blur-sm">
+    <div id="modalUpdate"
+        class="fixed inset-0 bg-black/80 z-50 hidden flex items-center justify-center p-4 backdrop-blur-sm">
         <div class="glass-panel rounded-2xl p-6 w-full max-w-md border border-dark-700 shadow-2xl">
             <div class="flex justify-between items-center mb-6">
-                <h3 class="text-white font-bold text-lg flex items-center gap-2"><i data-lucide="file-spreadsheet" class="text-brand-success"></i> Cargar Nuevos Reportes</h3>
-                <button onclick="cerrarModalUpdate()" class="text-gray-400 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+                <h3 class="text-white font-bold text-lg flex items-center gap-2"><i data-lucide="file-spreadsheet"
+                        class="text-brand-success"></i> Cargar Nuevos Reportes</h3>
+                <button onclick="cerrarModalUpdate()" class="text-gray-400 hover:text-white"><i data-lucide="x"
+                        class="w-5 h-5"></i></button>
             </div>
             <div class="space-y-4">
                 <div>
                     <label class="block text-sm text-gray-400 mb-1">Archivo de Flujo Operativo (CSV/Excel)</label>
-                    <input type="file" id="fileOps" accept=".xlsx, .xls, .csv" class="w-full bg-dark-900 border border-dark-700 rounded-lg p-2 text-sm text-gray-300">
+                    <input type="file" id="fileOps" accept=".xlsx, .xls, .csv"
+                        class="w-full bg-dark-900 border border-dark-700 rounded-lg p-2 text-sm text-gray-300">
                 </div>
                 <div>
                     <label class="block text-sm text-gray-400 mb-1">Archivo de Estados de TR's</label>
-                    <input type="file" id="fileTR" accept=".xlsx, .xls, .csv" class="w-full bg-dark-900 border border-dark-700 rounded-lg p-2 text-sm text-gray-300">
+                    <input type="file" id="fileTR" accept=".xlsx, .xls, .csv"
+                        class="w-full bg-dark-900 border border-dark-700 rounded-lg p-2 text-sm text-gray-300">
                 </div>
-                <button id="btnProcesar" onclick="procesarArchivos()" class="w-full bg-brand-success hover:bg-emerald-500 text-white font-bold py-2.5 rounded-lg mt-4 transition-colors flex justify-center items-center gap-2">
+                <button id="btnProcesar" onclick="procesarArchivos()"
+                    class="w-full bg-brand-success hover:bg-emerald-500 text-white font-bold py-2.5 rounded-lg mt-4 transition-colors flex justify-center items-center gap-2">
                     <i data-lucide="refresh-cw" class="w-4 h-4 hidden" id="spinnerIcon"></i>
                     Procesar y Actualizar
                 </button>
@@ -209,17 +264,23 @@
     </div>
 
     <!-- Modal Historial -->
-    <div id="modalHistorial" class="fixed inset-0 bg-black/80 z-50 hidden flex items-center justify-center p-4 backdrop-blur-sm">
+    <div id="modalHistorial"
+        class="fixed inset-0 bg-black/80 z-50 hidden flex items-center justify-center p-4 backdrop-blur-sm">
         <div class="glass-panel rounded-2xl p-6 w-full max-w-md border border-dark-700 shadow-2xl">
             <div class="flex justify-between items-center mb-6">
-                <h3 class="text-white font-bold text-lg flex items-center gap-2"><i data-lucide="history" class="text-blue-400"></i> Historial de Cargas</h3>
-                <button onclick="cerrarModalHistorial()" class="text-gray-400 hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+                <h3 class="text-white font-bold text-lg flex items-center gap-2"><i data-lucide="history"
+                        class="text-blue-400"></i> Historial de Cargas</h3>
+                <button onclick="cerrarModalHistorial()" class="text-gray-400 hover:text-white"><i data-lucide="x"
+                        class="w-5 h-5"></i></button>
             </div>
             <div class="space-y-3 max-h-60 overflow-y-auto custom-scrollbar pr-2" id="listaHistorial"></div>
-            <button onclick="limpiarHistorial()" class="w-full bg-dark-800 border border-dark-700 hover:bg-brand-danger/20 hover:text-brand-danger hover:border-brand-danger/50 text-gray-400 font-medium py-2 rounded-lg mt-6 transition-colors text-sm">Borrar Historial</button>
+            <button onclick="limpiarHistorial()"
+                class="w-full bg-dark-800 border border-dark-700 hover:bg-brand-danger/20 hover:text-brand-danger hover:border-brand-danger/50 text-gray-400 font-medium py-2 rounded-lg mt-6 transition-colors text-sm">Borrar
+                Historial</button>
         </div>
     </div>
 
     <script src="app.js"></script>
 </body>
+
 </html>

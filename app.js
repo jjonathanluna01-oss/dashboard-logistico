@@ -290,11 +290,11 @@ function extraerDatosTR(datos) {
 // --------------------------------------------------------
 function extraerOperariosDB(datos) {
     const OBJETIVOS_ZONA = {
-        'Abastecimiento': 1500,
-        'Almacenamiento': 1800,
-        'Picking': 1500,
-        'Control': 2000,
-        'Despacho': 1500
+        'Abastecimiento': 1600,
+        'Almacenamiento': 2000,
+        'Picking': 1000,
+        'Control': 1500,
+        'Despacho': 1500 // Este valor lo mantengo igual porque no lo mencionaste
     };
 
     const buscarLlave = (fila, aliases) => {
@@ -377,6 +377,7 @@ function RenderizarTablaDB(operarios) {
 
     let tableHtml = ''; // CORRECCIÓN: Se arma el HTML completo en variable
 
+// Dentro de tu forEach en RenderizarTablaDB, dejalo así:
     operarios.forEach((op) => {
         const style = getZoneColor(op.zona);
         const isGoalMet = op.eficienciaPct >= 100;
@@ -389,6 +390,7 @@ function RenderizarTablaDB(operarios) {
             <tr class="hover:bg-dark-800/50 transition-colors ${rowHighlight}">
                 <td class="p-3 font-medium text-white">${op.nombre}</td>
                 <td class="p-3"><span class="px-2 py-1 rounded text-xs font-semibold ${style}">${op.zona}</span></td>
+                <td class="p-3 text-center text-gray-400 font-semibold text-xs tracking-wider uppercase">${op.turno}</td> <!-- CELDA MOVIDA ACÁ -->
                 <td class="p-3 text-right">
                     <div class="flex flex-col items-end">
                         <span class="font-bold ${colorEficiencia}">${op.eficienciaPct.toFixed(1)}%</span>
@@ -397,7 +399,6 @@ function RenderizarTablaDB(operarios) {
                 </td>
             </tr>`;
     });
-    
     // Y se inyecta UNA sola vez, solucionando el crasheo
     tbody.innerHTML = tableHtml;
 }
