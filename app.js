@@ -128,17 +128,19 @@ function ActualizarDashboard(trData, abast, almac, pick, ctrl, desp) {
     const totalTRs = dataValues.reduce((acc, val) => acc + val, 0);
 
     const tbody = document.getElementById('trTableBody');
-    tbody.innerHTML = '';
+    let trHtml = ''; // CORRECCIÓN: Buffer para evitar recalcular el DOM cientos de veces
+    
     sortedTR.forEach(([estado, cantidad]) => {
         const porcentaje = totalTRs > 0 ? ((cantidad / totalTRs) * 100).toFixed(2) : '0.00';
         const badgeClass = BADGE_COLORS[estado] || 'bg-dark-700 text-gray-300';
-        tbody.innerHTML += `
+        trHtml += `
             <tr class="hover:bg-dark-800/50 transition-colors">
                 <td class="py-3"><span class="px-2 py-1 rounded text-xs font-semibold ${badgeClass}">${estado.replace(/_/g, ' ')}</span></td>
                 <td class="py-3 text-right font-medium text-white">${cantidad.toLocaleString(LOCALE)}</td>
                 <td class="py-3 text-right text-gray-400">${porcentaje}%</td>
             </tr>`;
     });
+    tbody.innerHTML = trHtml;
 
     if (barChartInstance) barChartInstance.destroy();
     barChartInstance = new Chart(document.getElementById('trBarChart'), {
@@ -244,7 +246,7 @@ function sumarColumna(datos, alias) {
 }
 
 // --------------------------------------------------------
-// LA FUNCIÓN NUEVA DE EXTRACCIÓN TR (PARA ARCHIVOS EN CRUDO)
+// EXTRACCIÓN TR (PARA ARCHIVOS EN CRUDO)
 // --------------------------------------------------------
 function extraerDatosTR(datos) {
     let nuevos = {};
@@ -265,8 +267,11 @@ function extraerDatosTR(datos) {
             est = String(f[keyEstado]).trim();
             cant = Number(f[keyCantidad]) || 0;
         } else {
+            // CORRECCIÓN: Si no encuentra la columna por nombre, solo asume que es un resumen 
+            // si la estructura tiene sentido (menos de 4 columnas).
+            // Esto evita que lea números de orden (N°orden) como "estados".
             const val = Object.values(f);
-            if (val.length >= 2) {
+            if (val.length <= 3 && val.length >= 2) {
                 est = String(val[0]).trim();
                 cant = Number(val[1]) || 0;
             }
@@ -297,9 +302,12 @@ function extraerOperariosDB(datos) {
         return key ? Number(fila[key]) || 0 : 0;
     };
 
-    let operarios = datos.map(fila => {
-        const nombreCol = Object.keys(fila).find(k => ['nombre y apellido', 'nombre'].includes(k.toLowerCase()));
-        const nombre = nombreCol ? fila[nombreCol] : 'Desconocido';
+    // CORRECCIÓN: Usamos un Map/Objeto para agrupar operarios antes de renderizar
+    const operariosMap = {};
+
+    datos.forEach(fila => {
+        const nombreCol = Object.keys(fila).find(k => ['nombre y apellido', 'nombre', 'operario'].includes(k.toLowerCase()));
+        const nombre = nombreCol ? String(fila[nombreCol]).trim() : 'Desconocido';
 
         const ing = buscarLlave(fila, COLUMNAS_OPS.abastecimiento);
         const gua = buscarLlave(fila, COLUMNAS_OPS.almacenamiento);
@@ -307,15 +315,33 @@ function extraerOperariosDB(datos) {
         const ctrl = buscarLlave(fila, COLUMNAS_OPS.control);
         const desp = buscarLlave(fila, COLUMNAS_OPS.despacho);
 
-        const total = ing + gua + pick + ctrl + desp;
+        const totalFila = ing + gua + pick + ctrl + desp;
+        if (totalFila === 0) return; // Se ignoran las filas que no suman operativas.
+
+        // Si el operario no existe en el mapa, lo creamos
+        if (!operariosMap[nombre]) {
+            operariosMap[nombre] = { ing: 0, gua: 0, pick: 0, ctrl: 0, desp: 0 };
+        }
+        
+        // Sumamos al total acumulado de ese operario
+        operariosMap[nombre].ing += ing;
+        operariosMap[nombre].gua += gua;
+        operariosMap[nombre].pick += pick;
+        operariosMap[nombre].ctrl += ctrl;
+        operariosMap[nombre].desp += desp;
+    });
+
+    let operarios = Object.keys(operariosMap).map(nombre => {
+        const op = operariosMap[nombre];
+        const total = op.ing + op.gua + op.pick + op.ctrl + op.desp;
 
         let zona = 'Sin Asignar';
         let max = 0;
-        if (ing > max) { max = ing; zona = 'Abastecimiento'; }
-        if (gua > max) { max = gua; zona = 'Almacenamiento'; }
-        if (pick > max) { max = pick; zona = 'Picking'; }
-        if (ctrl > max) { max = ctrl; zona = 'Control'; }
-        if (desp > max) { max = desp; zona = 'Despacho'; }
+        if (op.ing > max) { max = op.ing; zona = 'Abastecimiento'; }
+        if (op.gua > max) { max = op.gua; zona = 'Almacenamiento'; }
+        if (op.pick > max) { max = op.pick; zona = 'Picking'; }
+        if (op.ctrl > max) { max = op.ctrl; zona = 'Control'; }
+        if (op.desp > max) { max = op.desp; zona = 'Despacho'; }
 
         const objetivo = OBJETIVOS_ZONA[zona] || 1500;
         const eficienciaPct = (total / objetivo) * 100;
@@ -323,7 +349,7 @@ function extraerOperariosDB(datos) {
         return { nombre, total, zona, objetivo, eficienciaPct };
     });
 
-    return operarios.filter(op => op.total > 0).sort((a, b) => b.eficienciaPct - a.eficienciaPct);
+    return operarios.sort((a, b) => b.eficienciaPct - a.eficienciaPct);
 }
 
 // --------------------------------------------------------
@@ -333,7 +359,6 @@ function RenderizarTablaDB(operarios) {
     const tbody = document.getElementById('dbTableBody');
     if (!tbody) return;
     
-    tbody.innerHTML = '';
     if (operarios.length === 0) {
         tbody.innerHTML = '<tr><td colspan="3" class="py-6 text-center text-gray-500">No hay datos de operarios para mostrar.</td></tr>';
         return;
@@ -350,6 +375,8 @@ function RenderizarTablaDB(operarios) {
         return bgColors[zona] || 'bg-dark-700 text-gray-400';
     };
 
+    let tableHtml = ''; // CORRECCIÓN: Se arma el HTML completo en variable
+
     operarios.forEach((op) => {
         const style = getZoneColor(op.zona);
         const isGoalMet = op.eficienciaPct >= 100;
@@ -358,7 +385,7 @@ function RenderizarTablaDB(operarios) {
         const colorEficiencia = isGoalMet ? 'text-brand-success' : (isDanger ? 'text-brand-danger' : 'text-brand-warning');
         const rowHighlight = isDanger ? 'border-l-4 border-brand-danger bg-brand-danger/5' : 'border-l-4 border-transparent';
 
-        tbody.innerHTML += `
+        tableHtml += `
             <tr class="hover:bg-dark-800/50 transition-colors ${rowHighlight}">
                 <td class="p-3 font-medium text-white">${op.nombre}</td>
                 <td class="p-3"><span class="px-2 py-1 rounded text-xs font-semibold ${style}">${op.zona}</span></td>
@@ -370,6 +397,9 @@ function RenderizarTablaDB(operarios) {
                 </td>
             </tr>`;
     });
+    
+    // Y se inyecta UNA sola vez, solucionando el crasheo
+    tbody.innerHTML = tableHtml;
 }
 
 // --------------------------------------------------------
@@ -456,8 +486,8 @@ function generarNotificacionesEficiencia(operarios) {
 
     if (typeof lucide !== 'undefined') lucide.createIcons();
     if (badge) badge.classList.remove('hidden'); 
-
 }
+
 // --------------------------------------------------------
 // HISTORIAL
 // --------------------------------------------------------
