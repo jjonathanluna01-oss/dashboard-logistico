@@ -25,9 +25,12 @@ let doughnutChartInstance = null;
 
 let currentTRData = { "DISPATCHED": 0, "CREATED": 0 };
 let currentOpsData = { abast: 0, almac: 0, pick: 0, ctrl: 0, desp: 0 };
-let currentOperariosData = []; // NUEVO: Base de datos de operarios
+let currentOperariosData = []; 
 let currentFechaReporte = "Reporte Inicial (Sin Carga)";
 
+// --------------------------------------------------------
+// INICIALIZADOR AL CARGAR LA PÁGINA
+// --------------------------------------------------------
 document.addEventListener('DOMContentLoaded', () => {
     if (typeof lucide !== 'undefined') lucide.createIcons();
     ConfigurarGraficosBase();
@@ -54,7 +57,6 @@ function switchTab(tab) {
     const btnDash = document.getElementById('btnTabDashboard');
     const btnDB = document.getElementById('btnTabDB');
 
-    // Clases CSS actualizadas para un look más moderno
     const activeClass = "px-5 py-1.5 text-sm rounded-lg bg-dark-700/80 text-white font-medium shadow-sm border border-dark-600/50 transition-all";
     const inactiveClass = "px-5 py-1.5 text-sm rounded-lg text-gray-400 hover:text-white hover:bg-dark-700/50 transition-all border border-transparent";
 
@@ -107,6 +109,9 @@ function ConfigurarGraficosBase() {
     Chart.defaults.plugins.tooltip.borderColor = '#262a36';
 }
 
+// --------------------------------------------------------
+// ACTUALIZAR MÉTRICAS DEL DASHBOARD
+// --------------------------------------------------------
 function ActualizarDashboard(trData, abast, almac, pick, ctrl, desp) {
     currentOpsData = { abast, almac, pick, ctrl, desp };
     guardarEstado();
@@ -156,41 +161,8 @@ function ActualizarDashboard(trData, abast, almac, pick, ctrl, desp) {
     });
 }
 
-function RenderizarTablaDB(operarios) {
-    const tbody = document.getElementById('dbTableBody');
-    if (!tbody) return;
-
-    tbody.innerHTML = '';
-    if (operarios.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="3" class="py-6 text-center text-gray-500">No hay datos de operarios para mostrar.</td></tr>';
-        return;
-    }
-
-    // Colores para la zona operativa en la tabla
-    const getZoneColor = (zona) => {
-        const bgColors = {
-            'Abastecimiento': 'bg-brand-warning/20 text-brand-warning',
-            'Almacenamiento': 'bg-brand-accent/20 text-brand-accent',
-            'Picking': 'bg-brand-purple/20 text-brand-purple',
-            'Control': 'bg-brand-success/20 text-brand-success',
-            'Despacho': 'bg-blue-500/20 text-blue-500'
-        };
-        return bgColors[zona] || 'bg-dark-700 text-gray-400';
-    };
-
-    operarios.forEach((op) => {
-        const style = getZoneColor(op.zona);
-        tbody.innerHTML += `
-            <tr class="hover:bg-dark-800/50 transition-colors">
-                <td class="p-3 font-medium text-white">${op.nombre}</td>
-                <td class="p-3"><span class="px-2 py-1 rounded text-xs font-semibold ${style}">${op.zona}</span></td>
-                <td class="p-3 text-right font-bold text-gray-300">${op.total.toLocaleString(LOCALE)}</td>
-            </tr>`;
-    });
-}
-
 // --------------------------------------------------------
-// MODALES Y LECTURA
+// MODALES Y LECTURA DE EXCEL
 // --------------------------------------------------------
 function abrirModalUpdate() { document.getElementById('modalUpdate').classList.remove('hidden'); }
 function cerrarModalUpdate() { document.getElementById('modalUpdate').classList.add('hidden'); }
@@ -209,19 +181,15 @@ async function procesarArchivos() {
         if (fileOps) {
             const dataOps = await leerExcel(fileOps);
             if (dataOps.length > 0) {
-                // Sumar totales globales
                 nAbast = sumarColumna(dataOps, COLUMNAS_OPS.abastecimiento).total;
                 nAlmac = sumarColumna(dataOps, COLUMNAS_OPS.almacenamiento).total;
                 nPick = sumarColumna(dataOps, COLUMNAS_OPS.picking).total;
                 nCtrl = sumarColumna(dataOps, COLUMNAS_OPS.control).total;
                 const rDesp = sumarColumna(dataOps, COLUMNAS_OPS.despacho);
                 if (rDesp.encontrada) nDesp = rDesp.total;
-currentOperariosData = extraerOperariosDB(dataOps);
                 
-                // 👉 LÍNEA CLAVE PARA QUE FUNCIONE EL CENTRO DE NOTIFICACIONES:
-                generarNotificacionesEficiencia(currentOperariosData);
-                // Extraer operarios (Eficiencia y Zona)
                 currentOperariosData = extraerOperariosDB(dataOps);
+                generarNotificacionesEficiencia(currentOperariosData);
             }
         }
 
@@ -275,15 +243,40 @@ function sumarColumna(datos, alias) {
     return { total, encontrada: true };
 }
 
+// --------------------------------------------------------
+// LA FUNCIÓN NUEVA DE EXTRACCIÓN TR (PARA ARCHIVOS EN CRUDO)
+// --------------------------------------------------------
 function extraerDatosTR(datos) {
     let nuevos = {};
+    if (!datos || datos.length === 0) return nuevos;
+
+    const aliasesEstado = ['estado', 'estado tr'];
+    const aliasesCantidad = ['cantidad solicitada', 'cantidad', 'cant. solicitada', 'solicitada'];
+
+    const cols = Object.keys(datos[0]);
+    const keyEstado = cols.find(c => aliasesEstado.some(a => c.toLowerCase().includes(a)));
+    const keyCantidad = cols.find(c => aliasesCantidad.some(a => c.toLowerCase().includes(a)));
+
     datos.forEach(f => {
-        const val = Object.values(f);
-        if (val.length >= 2) {
-            const est = String(val[0]).trim(), cant = Number(val[1]) || 0;
-            if (est && est !== "0" && !est.includes("Total general")) nuevos[est] = cant;
+        let est = "";
+        let cant = 0;
+
+        if (keyEstado && keyCantidad) {
+            est = String(f[keyEstado]).trim();
+            cant = Number(f[keyCantidad]) || 0;
+        } else {
+            const val = Object.values(f);
+            if (val.length >= 2) {
+                est = String(val[0]).trim();
+                cant = Number(val[1]) || 0;
+            }
+        }
+
+        if (est && est !== "0" && est !== "undefined" && !est.toLowerCase().includes("total general")) {
+            nuevos[est] = (nuevos[est] || 0) + cant;
         }
     });
+    
     return nuevos;
 }
 
@@ -291,13 +284,12 @@ function extraerDatosTR(datos) {
 // LÓGICA DE EXTRACCIÓN DB (EFICIENCIA Y ZONA)
 // --------------------------------------------------------
 function extraerOperariosDB(datos) {
-    // Definición de objetivos por zona asignada
     const OBJETIVOS_ZONA = {
         'Abastecimiento': 1500,
         'Almacenamiento': 1800,
         'Picking': 1500,
         'Control': 2000,
-        'Despacho': 1500 // Valor por defecto asignado
+        'Despacho': 1500
     };
 
     const buscarLlave = (fila, aliases) => {
@@ -317,7 +309,6 @@ function extraerOperariosDB(datos) {
 
         const total = ing + gua + pick + ctrl + desp;
 
-        // Determinar zona principal del operario
         let zona = 'Sin Asignar';
         let max = 0;
         if (ing > max) { max = ing; zona = 'Abastecimiento'; }
@@ -326,14 +317,12 @@ function extraerOperariosDB(datos) {
         if (ctrl > max) { max = ctrl; zona = 'Control'; }
         if (desp > max) { max = desp; zona = 'Despacho'; }
 
-        // Calcular % de Eficiencia
         const objetivo = OBJETIVOS_ZONA[zona] || 1500;
         const eficienciaPct = (total / objetivo) * 100;
 
         return { nombre, total, zona, objetivo, eficienciaPct };
     });
 
-    // Filtramos gente sin eficiencia y los ordenamos por PORCENTAJE (de mayor a menor)
     return operarios.filter(op => op.total > 0).sort((a, b) => b.eficienciaPct - a.eficienciaPct);
 }
 
@@ -363,16 +352,10 @@ function RenderizarTablaDB(operarios) {
 
     operarios.forEach((op) => {
         const style = getZoneColor(op.zona);
-        
-        // Lógica de colores por rendimiento
         const isGoalMet = op.eficienciaPct >= 100;
-        const isDanger = op.eficienciaPct < 70; // Menos de 70%
-        const isWarning = op.eficienciaPct >= 70 && op.eficienciaPct < 100;
+        const isDanger = op.eficienciaPct < 70; 
         
-        // Color del número de porcentaje
         const colorEficiencia = isGoalMet ? 'text-brand-success' : (isDanger ? 'text-brand-danger' : 'text-brand-warning');
-        
-        // Efecto visual en la fila entera si está en peligro (< 70%)
         const rowHighlight = isDanger ? 'border-l-4 border-brand-danger bg-brand-danger/5' : 'border-l-4 border-transparent';
 
         tbody.innerHTML += `
@@ -388,90 +371,7 @@ function RenderizarTablaDB(operarios) {
             </tr>`;
     });
 }
-// --------------------------------------------------------
-// CENTRO DE NOTIFICACIONES (Actualizado con Alertas)
-// --------------------------------------------------------
-function generarNotificacionesEficiencia(operarios) {
-    const contenedor = document.getElementById('listaNotificaciones');
-    const badge = document.getElementById('notifBadge');
-    if (!contenedor) return;
 
-    if (!operarios || operarios.length === 0) {
-        contenedor.innerHTML = '<p class="text-gray-500 text-center py-4">No hay datos de eficiencia disponibles.</p>';
-        if (badge) badge.classList.add('hidden');
-        return;
-    }
-
-    const totalOperarios = operarios.length;
-    const mejorOperario = operarios[0]; // El operario con mayor porcentaje
-    const operariosDestacados = operarios.filter(op => op.eficienciaPct >= 100).length;
-
-    // NUEVO: Extraer operarios con eficiencia menor al 70%
-    const operariosBajoRendimiento = operarios.filter(op => op.eficienciaPct < 70);
-
-    let notifs = [];
-
-    // Notificación 1: Top Eficiencia
-    if (mejorOperario && mejorOperario.eficienciaPct > 0) {
-        notifs.push({
-            titulo: 'Top Eficiencia del Turno',
-            desc: `<b>${mejorOperario.nombre}</b> alcanzó un espectacular <b>${mejorOperario.eficienciaPct.toFixed(1)}%</b> en la zona de <b>${mejorOperario.zona}</b> (procesó ${mejorOperario.total.toLocaleString(LOCALE)} unidades).`,
-            tipo: 'success',
-            icon: 'award',
-            tiempo: 'Hace un momento'
-        });
-    }
-
-    // Notificación 2: Rendimiento Global de la Planta
-    notifs.push({
-        titulo: 'Rendimiento Global',
-        desc: `Actualmente, <b>${operariosDestacados} de ${totalOperarios} operarios</b> alcanzaron o superaron el objetivo productivo (100% de eficiencia).`,
-        tipo: 'info',
-        icon: 'info',
-        tiempo: 'Actualizado'
-    });
-
-    // NUEVO: Notificación 3: Alerta de Bajo Rendimiento (< 70%)
-    if (operariosBajoRendimiento.length > 0) {
-        // Crear una lista en HTML con los nombres y sus porcentajes
-        const listaNombres = operariosBajoRendimiento.map(op =>
-            `<li>${op.nombre}: <b class="text-white">${op.eficienciaPct.toFixed(1)}%</b></li>`
-        ).join('');
-
-        notifs.push({
-            titulo: 'Alerta de Rendimiento (< 70%)',
-            desc: `Los siguientes operarios se encuentran por debajo del rendimiento esperado:<br><ul class="mt-1.5 ml-4 list-disc text-gray-400 space-y-0.5">${listaNombres}</ul>`,
-            tipo: 'danger',
-            icon: 'alert-triangle',
-            tiempo: 'Requiere atención'
-        });
-    }
-
-    // Renderizar en el panel
-    contenedor.innerHTML = notifs.map(n => {
-        // Asignar color según el tipo de notificación
-        const colorClass = n.tipo === 'success' ? 'text-brand-success' :
-            n.tipo === 'danger' ? 'text-brand-danger' : 'text-blue-400';
-
-        return `
-        <div class="bg-dark-900 border border-dark-700 p-3 rounded-xl flex gap-3 items-start">
-            <div class="p-2 rounded-lg bg-dark-800 ${colorClass} flex-shrink-0">
-                <i data-lucide="${n.icon}" class="w-4 h-4"></i>
-            </div>
-            <div class="flex-1">
-                <h5 class="text-white font-semibold mb-0.5">${n.titulo}</h5>
-                <p class="text-gray-400 leading-relaxed">${n.desc}</p>
-                <span class="text-[10px] text-gray-500 mt-1 block">${n.tiempo}</span>
-            </div>
-        </div>`;
-    }).join('');
-
-    // Refrescar los íconos de Lucide
-    if (typeof lucide !== 'undefined') lucide.createIcons();
-
-    // Activar el puntito rojo (badge) de la campanita
-    if (badge) badge.classList.remove('hidden');
-}
 // --------------------------------------------------------
 // CENTRO DE NOTIFICACIONES Y ALERTAS
 // --------------------------------------------------------
@@ -479,10 +379,8 @@ function toggleCentroNotificaciones() {
     const panel = document.getElementById('panelNotificaciones');
     if (!panel) return;
     
-    // Alternar visibilidad del panel
     panel.classList.toggle('hidden');
     
-    // Si se abre el panel, ocultamos el puntito rojo de "nueva notificación"
     if (!panel.classList.contains('hidden')) {
         const badge = document.getElementById('notifBadge');
         if (badge) badge.classList.add('hidden');
@@ -501,15 +399,12 @@ function generarNotificacionesEficiencia(operarios) {
     }
 
     const totalOperarios = operarios.length;
-    const mejorOperario = operarios[0]; // Como ya vienen ordenados, el 0 es el mejor
+    const mejorOperario = operarios[0];
     const operariosDestacados = operarios.filter(op => op.eficienciaPct >= 100).length;
-    
-    // Extraer operarios con eficiencia menor al 70%
     const operariosBajoRendimiento = operarios.filter(op => op.eficienciaPct < 70);
 
     let notifs = [];
 
-    // Notificación 1: Top Eficiencia
     if (mejorOperario && mejorOperario.eficienciaPct > 0) {
         notifs.push({
             titulo: 'Top Eficiencia del Turno',
@@ -520,7 +415,6 @@ function generarNotificacionesEficiencia(operarios) {
         });
     }
 
-    // Notificación 2: Rendimiento Global de la Planta
     notifs.push({
         titulo: 'Rendimiento Global',
         desc: `Actualmente, <b>${operariosDestacados} de ${totalOperarios} operarios</b> alcanzaron o superaron el objetivo productivo (100% de eficiencia).`,
@@ -529,9 +423,7 @@ function generarNotificacionesEficiencia(operarios) {
         tiempo: 'Actualizado'
     });
 
-    // Notificación 3: Alerta de Bajo Rendimiento (< 70%)
     if (operariosBajoRendimiento.length > 0) {
-        // Armar lista con los nombres
         const listaNombres = operariosBajoRendimiento.map(op => 
             `<li>${op.nombre}: <b class="text-white">${op.eficienciaPct.toFixed(1)}%</b></li>`
         ).join('');
@@ -545,7 +437,6 @@ function generarNotificacionesEficiencia(operarios) {
         });
     }
 
-    // Dibujar las notificaciones en el HTML
     contenedor.innerHTML = notifs.map(n => {
         const colorClass = n.tipo === 'success' ? 'text-brand-success' : 
                            n.tipo === 'danger' ? 'text-brand-danger' : 'text-blue-400';
@@ -563,15 +454,12 @@ function generarNotificacionesEficiencia(operarios) {
         </div>`;
     }).join('');
 
-    // Refrescar los íconos
     if (typeof lucide !== 'undefined') lucide.createIcons();
-    
-    // Mostrar el puntito rojo en la campana
     if (badge) badge.classList.remove('hidden'); 
 }
 
 // --------------------------------------------------------
-// HISTORIAL (Solo esqueleto básico)
+// HISTORIAL
 // --------------------------------------------------------
 function abrirModalHistorial() { document.getElementById('modalHistorial').classList.remove('hidden'); }
 function cerrarModalHistorial() { document.getElementById('modalHistorial').classList.add('hidden'); }
