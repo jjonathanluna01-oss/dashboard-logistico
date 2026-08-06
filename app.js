@@ -456,8 +456,8 @@ function generarNotificacionesEficiencia(operarios) {
 
     if (typeof lucide !== 'undefined') lucide.createIcons();
     if (badge) badge.classList.remove('hidden'); 
-}
 
+}
 // --------------------------------------------------------
 // HISTORIAL
 // --------------------------------------------------------
