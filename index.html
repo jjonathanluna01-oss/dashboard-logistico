@@ -50,6 +50,13 @@
                 <span id="fechaReporte">Reporte Inicial</span>
             </button>
 
+            <!-- 1b. Botón Metas por Zona -->
+            <button onclick="abrirModalObjetivos()"
+                class="glass-panel p-2.5 rounded-xl flex items-center justify-center text-gray-300 hover:text-white hover:bg-dark-800 transition-colors border border-transparent hover:border-gray-600"
+                title="Configurar metas por zona">
+                <i data-lucide="settings" class="w-5 h-5 text-gray-400"></i>
+            </button>
+
             <!-- 2. Botón Cargar Datos -->
             <button onclick="abrirModalUpdate()"
                 class="bg-brand-accent hover:bg-red-700 text-white text-sm px-5 py-2 rounded-xl flex items-center gap-2 transition-colors font-medium shadow-lg shadow-red-900/30">
@@ -160,7 +167,7 @@
                         </div>
                         <div class="mt-4 flex items-baseline gap-2"><span id="cardDespacho"
                                 class="text-3xl font-bold text-white">0</span><span
-                                class="text-xs text-gray-500">unidades</span></div>
+                                class="text-xs text-gray-500" id="lblUnidadDespacho">unidades</span></div>
                     </div>
                 </div>
                 <div id="avisoColumnas"
@@ -254,6 +261,12 @@
                     <input type="file" id="fileTR" accept=".xlsx, .xls, .csv"
                         class="w-full bg-dark-900 border border-dark-700 rounded-lg p-2 text-sm text-gray-300">
                 </div>
+                <div>
+                    <label class="block text-sm text-gray-400 mb-1">Nómina / Turnos (opcional, columnas Nombre y Turno)</label>
+                    <input type="file" id="fileNomina" accept=".xlsx, .xls, .csv"
+                        class="w-full bg-dark-900 border border-dark-700 rounded-lg p-2 text-sm text-gray-300">
+                    <p class="text-[11px] text-gray-500 mt-1">Se guarda en este navegador, no hace falta volver a subirla cada vez.</p>
+                </div>
                 <button id="btnProcesar" onclick="procesarArchivos()"
                     class="w-full bg-brand-success hover:bg-emerald-500 text-white font-bold py-2.5 rounded-lg mt-4 transition-colors flex justify-center items-center gap-2">
                     <i data-lucide="refresh-cw" class="w-4 h-4 hidden" id="spinnerIcon"></i>
@@ -277,6 +290,46 @@
             <button onclick="limpiarHistorial()"
                 class="w-full bg-dark-800 border border-dark-700 hover:bg-brand-danger/20 hover:text-brand-danger hover:border-brand-danger/50 text-gray-400 font-medium py-2 rounded-lg mt-6 transition-colors text-sm">Borrar
                 Historial</button>
+        </div>
+    </div>
+
+    <!-- Modal Metas por Zona -->
+    <div id="modalObjetivos"
+        class="fixed inset-0 bg-black/80 z-50 hidden flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="glass-panel rounded-2xl p-6 w-full max-w-md border border-dark-700 shadow-2xl">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-white font-bold text-lg flex items-center gap-2"><i data-lucide="target"
+                        class="text-brand-accent"></i> Metas por Zona</h3>
+                <button onclick="cerrarModalObjetivos()" class="text-gray-400 hover:text-white"><i data-lucide="x"
+                        class="w-5 h-5"></i></button>
+            </div>
+            <p class="text-xs text-gray-500 mb-4">Unidades diarias esperadas por operario en cada zona. Se usan para calcular el % de eficiencia y las alertas de rendimiento.</p>
+            <div class="space-y-3">
+                <div class="flex items-center justify-between gap-3">
+                    <label class="text-sm text-gray-400">Abastecimiento</label>
+                    <input type="number" id="objAbastecimiento" class="w-28 bg-dark-900 border border-dark-700 rounded-lg p-2 text-sm text-white text-right">
+                </div>
+                <div class="flex items-center justify-between gap-3">
+                    <label class="text-sm text-gray-400">Almacenamiento</label>
+                    <input type="number" id="objAlmacenamiento" class="w-28 bg-dark-900 border border-dark-700 rounded-lg p-2 text-sm text-white text-right">
+                </div>
+                <div class="flex items-center justify-between gap-3">
+                    <label class="text-sm text-gray-400">Picking</label>
+                    <input type="number" id="objPicking" class="w-28 bg-dark-900 border border-dark-700 rounded-lg p-2 text-sm text-white text-right">
+                </div>
+                <div class="flex items-center justify-between gap-3">
+                    <label class="text-sm text-gray-400">Control</label>
+                    <input type="number" id="objControl" class="w-28 bg-dark-900 border border-dark-700 rounded-lg p-2 text-sm text-white text-right">
+                </div>
+                <div class="flex items-center justify-between gap-3">
+                    <label class="text-sm text-gray-400">Despacho</label>
+                    <input type="number" id="objDespacho" class="w-28 bg-dark-900 border border-dark-700 rounded-lg p-2 text-sm text-white text-right">
+                </div>
+            </div>
+            <button onclick="guardarObjetivosDesdeFormulario()"
+                class="w-full bg-brand-accent hover:bg-red-700 text-white font-bold py-2.5 rounded-lg mt-6 transition-colors">
+                Guardar Metas
+            </button>
         </div>
     </div>
 
