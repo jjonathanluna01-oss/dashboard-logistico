@@ -22,18 +22,35 @@ const BADGE_COLORS = {
 
 let barChartInstance = null;
 let doughnutChartInstance = null;
+// Agrega esta variable junto a las otras
+let nominaGlobal = []; 
+
+// Agrega esta función para pedir los datos al backend
+async function cargarNominaDesdeBD() {
+    try {
+        const respuesta = await fetch('http://localhost:3000/api/operarios');
+        if (respuesta.ok) {
+            nominaGlobal = await respuesta.json();
+            console.log("✅ Nómina cargada exitosamente desde SQL:", nominaGlobal);
+        }
+    } catch (error) {
+        console.error("❌ Error conectando con la base de datos:", error);
+    }
+}
 
 let currentTRData = { "DISPATCHED": 0, "CREATED": 0 };
 let currentOpsData = { abast: 0, almac: 0, pick: 0, ctrl: 0, desp: 0 };
 let currentOperariosData = []; 
 let currentFechaReporte = "Reporte Inicial (Sin Carga)";
 
-// --------------------------------------------------------
+
 // INICIALIZADOR AL CARGAR LA PÁGINA
-// --------------------------------------------------------
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     if (typeof lucide !== 'undefined') lucide.createIcons();
     ConfigurarGraficosBase();
+    
+    // 👇 LLAMAMOS AL BACKEND AL INICIAR 👇
+    await cargarNominaDesdeBD(); 
 
     const guardado = cargarEstadoGuardado();
     if (guardado) {
@@ -47,7 +64,6 @@ document.addEventListener('DOMContentLoaded', () => {
     ActualizarDashboard(currentTRData, currentOpsData.abast, currentOpsData.almac, currentOpsData.pick, currentOpsData.ctrl, currentOpsData.desp);
     RenderizarTablaDB(currentOperariosData);
 });
-
 // --------------------------------------------------------
 // SISTEMA DE PESTAÑAS (TABS)
 // --------------------------------------------------------
@@ -331,7 +347,7 @@ function extraerOperariosDB(datos) {
         operariosMap[nombre].desp += desp;
     });
 
-    let operarios = Object.keys(operariosMap).map(nombre => {
+  let operarios = Object.keys(operariosMap).map(nombre => {
         const op = operariosMap[nombre];
         const total = op.ing + op.gua + op.pick + op.ctrl + op.desp;
 
@@ -346,11 +362,17 @@ function extraerOperariosDB(datos) {
         const objetivo = OBJETIVOS_ZONA[zona] || 1500;
         const eficienciaPct = (total / objetivo) * 100;
 
-        return { nombre, total, zona, objetivo, eficienciaPct };
+        // 👇 CRUCE CON LA BASE DE DATOS 👇
+        // Buscamos si el nombre del excel coincide con alguno de SQL
+        const operarioEnBD = nominaGlobal.find(n => n.nombre.toLowerCase() === nombre.toLowerCase());
+        const turnoAsignado = operarioEnBD ? operarioEnBD.turno : 'Sin Turno';
+
+        // Ahora devolvemos también el turno
+        return { nombre, total, zona, objetivo, eficienciaPct, turno: turnoAsignado };
     });
 
     return operarios.sort((a, b) => b.eficienciaPct - a.eficienciaPct);
-}
+    }
 
 // --------------------------------------------------------
 // RENDERIZAR TABLA DE EFICIENCIA (Con Alertas Visuales)
