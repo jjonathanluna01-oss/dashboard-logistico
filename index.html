@@ -128,6 +128,7 @@
                         <div class="mt-4 flex items-baseline gap-2"><span id="cardAbastecimiento"
                                 class="text-3xl font-bold text-white">0</span><span
                                 class="text-xs text-gray-500">unidades</span></div>
+                        <div id="deltaAbastecimiento" class="mt-1 text-xs h-4"></div>
                     </div>
                     <div class="glass-panel metric-card rounded-2xl p-5 border-t-2 border-t-brand-accent">
                         <div class="flex justify-between items-start"><span
@@ -138,6 +139,7 @@
                         <div class="mt-4 flex items-baseline gap-2"><span id="cardAlmacenamiento"
                                 class="text-3xl font-bold text-white">0</span><span
                                 class="text-xs text-gray-500">unidades</span></div>
+                        <div id="deltaAlmacenamiento" class="mt-1 text-xs h-4"></div>
                     </div>
                     <div class="glass-panel metric-card rounded-2xl p-5 border-t-2 border-t-brand-purple">
                         <div class="flex justify-between items-start"><span
@@ -148,6 +150,7 @@
                         <div class="mt-4 flex items-baseline gap-2"><span id="cardPicking"
                                 class="text-3xl font-bold text-white">0</span><span
                                 class="text-xs text-gray-500">unidades</span></div>
+                        <div id="deltaPicking" class="mt-1 text-xs h-4"></div>
                     </div>
                     <div class="glass-panel metric-card rounded-2xl p-5 border-t-2 border-t-brand-success">
                         <div class="flex justify-between items-start"><span
@@ -158,6 +161,7 @@
                         <div class="mt-4 flex items-baseline gap-2"><span id="cardControl"
                                 class="text-3xl font-bold text-white">0</span><span
                                 class="text-xs text-gray-500">unidades</span></div>
+                        <div id="deltaControl" class="mt-1 text-xs h-4"></div>
                     </div>
                     <div class="glass-panel metric-card rounded-2xl p-5 border-t-2 border-t-blue-500">
                         <div class="flex justify-between items-start"><span
@@ -168,6 +172,7 @@
                         <div class="mt-4 flex items-baseline gap-2"><span id="cardDespacho"
                                 class="text-3xl font-bold text-white">0</span><span
                                 class="text-xs text-gray-500" id="lblUnidadDespacho">unidades</span></div>
+                        <div id="deltaDespacho" class="mt-1 text-xs h-4"></div>
                     </div>
                 </div>
                 <div id="avisoColumnas"
@@ -223,14 +228,42 @@
                         <i data-lucide="users" class="text-blue-500"></i> Eficiencia por Operario
                     </h2>
                 </div>
+
+                <!-- Filtros: nombre, zona, turno -->
+                <div class="flex flex-col sm:flex-row gap-3 mb-4">
+                    <div class="relative flex-1">
+                        <i data-lucide="search" class="w-4 h-4 text-gray-500 absolute left-3 top-1/2 -translate-y-1/2"></i>
+                        <input type="text" id="filtroNombreDB" oninput="aplicarFiltrosDB()" placeholder="Buscar operario..."
+                            class="w-full bg-dark-900 border border-dark-700 rounded-lg pl-9 pr-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-brand-accent">
+                    </div>
+                    <select id="filtroZonaDB" onchange="aplicarFiltrosDB()"
+                        class="bg-dark-900 border border-dark-700 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-brand-accent">
+                        <option value="">Todas las zonas</option>
+                        <option value="Abastecimiento">Abastecimiento</option>
+                        <option value="Almacenamiento">Almacenamiento</option>
+                        <option value="Picking">Picking</option>
+                        <option value="Control">Control</option>
+                        <option value="Despacho">Despacho</option>
+                        <option value="Sin Asignar">Sin Asignar</option>
+                    </select>
+                    <select id="filtroTurnoDB" onchange="aplicarFiltrosDB()"
+                        class="bg-dark-900 border border-dark-700 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-brand-accent">
+                        <option value="">Todos los turnos</option>
+                    </select>
+                    <button onclick="limpiarFiltrosDB()"
+                        class="bg-dark-800 border border-dark-700 hover:border-gray-500 text-gray-400 hover:text-white text-sm px-3 py-2 rounded-lg transition-colors flex items-center gap-1.5 shrink-0">
+                        <i data-lucide="x" class="w-3.5 h-3.5"></i> Limpiar
+                    </button>
+                </div>
+
                 <div class="overflow-x-auto custom-scrollbar">
                     <table class="w-full text-left text-sm whitespace-nowrap">
                         <thead class="text-gray-400 border-b border-dark-700 bg-dark-800/50">
                             <tr>
-                                <th class="p-3 font-medium rounded-tl-lg">Nombre y Apellido</th>
-                                <th class="p-3 font-medium">Zona Operaria</th>
-                                <th class="p-3 font-medium text-center">Turno</th> <!-- AHORA ESTÁ AL LADO DE ZONA -->
-                                <th class="p-3 font-medium text-right rounded-tr-lg">Total Unidades (Eficiencia)</th>
+                                <th class="p-3 font-medium rounded-tl-lg cursor-pointer select-none hover:text-white" onclick="ordenarPorColumna('nombre')">Nombre y Apellido <span id="ordenIcon-nombre" class="text-[10px]"></span></th>
+                                <th class="p-3 font-medium cursor-pointer select-none hover:text-white" onclick="ordenarPorColumna('zona')">Zona Operaria <span id="ordenIcon-zona" class="text-[10px]"></span></th>
+                                <th class="p-3 font-medium text-center cursor-pointer select-none hover:text-white" onclick="ordenarPorColumna('turno')">Turno <span id="ordenIcon-turno" class="text-[10px]"></span></th>
+                                <th class="p-3 font-medium text-right rounded-tr-lg cursor-pointer select-none hover:text-white" onclick="ordenarPorColumna('eficienciaPct')">Total Unidades (Eficiencia) <span id="ordenIcon-eficienciaPct" class="text-[10px]"></span></th>
                             </tr>
                         </thead>
                         <tbody id="dbTableBody" class="divide-y divide-dark-700">

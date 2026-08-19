@@ -42,6 +42,12 @@ const OBJETIVOS_DEFAULT = {
     'Despacho': 1500
 };
 
+// campo en currentOpsData -> {id del div de delta, nombre de zona a mostrar}
+const CAMPOS_DELTA = {
+    abast: 'Abastecimiento', almac: 'Almacenamiento', pick: 'Picking',
+    ctrl: 'Control', desp: 'Despacho'
+};
+
 let barChartInstance = null;
 let doughnutChartInstance = null;
 let nominaGlobal = [];
@@ -281,6 +287,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Se populan las notificaciones para que estén listas al abrir el panel,
     // pero sin encender el puntito rojo (no son "nuevas" en esta carga de página).
     generarNotificacionesEficiencia(currentOperariosData, false);
+    renderizarComparacionKPIs();
 });
 }
 
@@ -506,6 +513,7 @@ async function procesarArchivos() {
         RenderizarTablaDB(currentOperariosData);
         guardarEstado();
         guardarHistorial();
+        renderizarComparacionKPIs();
         cerrarModalUpdate();
 
     } catch (error) {
@@ -661,12 +669,99 @@ function extraerOperariosDB(datos) {
 // --------------------------------------------------------
 // RENDERIZAR TABLA DE EFICIENCIA (Con Alertas Visuales)
 // --------------------------------------------------------
+let ordenDB = { campo: 'eficienciaPct', direccion: 'desc' };
+
 function RenderizarTablaDB(operarios) {
+    currentOperariosData = operarios || [];
+    poblarFiltroTurnosDB(currentOperariosData);
+    actualizarIndicadoresOrden();
+    aplicarFiltrosDB();
+}
+
+// --------------------------------------------------------
+// FILTROS DE LA TABLA DB (nombre / zona / turno)
+// --------------------------------------------------------
+function poblarFiltroTurnosDB(operarios) {
+    const sel = document.getElementById('filtroTurnoDB');
+    if (!sel) return;
+    const valorActual = sel.value;
+    const turnos = [...new Set(operarios.map(op => op.turno))].sort((a, b) => a.localeCompare(b));
+    sel.innerHTML = '<option value="">Todos los turnos</option>' +
+        turnos.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+    if (turnos.includes(valorActual)) sel.value = valorActual;
+}
+
+function limpiarFiltrosDB() {
+    const nombreEl = document.getElementById('filtroNombreDB');
+    const zonaEl = document.getElementById('filtroZonaDB');
+    const turnoEl = document.getElementById('filtroTurnoDB');
+    if (nombreEl) nombreEl.value = '';
+    if (zonaEl) zonaEl.value = '';
+    if (turnoEl) turnoEl.value = '';
+    aplicarFiltrosDB();
+}
+
+function aplicarFiltrosDB() {
+    const nombreEl = document.getElementById('filtroNombreDB');
+    const zonaEl = document.getElementById('filtroZonaDB');
+    const turnoEl = document.getElementById('filtroTurnoDB');
+
+    const nombreFiltro = nombreEl ? normalizarNombre(nombreEl.value) : '';
+    const zonaFiltro = zonaEl ? zonaEl.value : '';
+    const turnoFiltro = turnoEl ? turnoEl.value : '';
+
+    let filtrados = (currentOperariosData || []).filter(op => {
+        if (nombreFiltro && !normalizarNombre(op.nombre).includes(nombreFiltro)) return false;
+        if (zonaFiltro && op.zona !== zonaFiltro) return false;
+        if (turnoFiltro && op.turno !== turnoFiltro) return false;
+        return true;
+    });
+
+    renderizarFilasDB(ordenarOperarios(filtrados));
+}
+
+// --------------------------------------------------------
+// ORDEN DE LA TABLA DB (clic en headers)
+// --------------------------------------------------------
+function ordenarOperarios(lista) {
+    const { campo, direccion } = ordenDB;
+    const factor = direccion === 'asc' ? 1 : -1;
+    return [...lista].sort((a, b) => {
+        const va = a[campo], vb = b[campo];
+        if (typeof va === 'string') return va.localeCompare(vb) * factor;
+        return (va - vb) * factor;
+    });
+}
+
+function ordenarPorColumna(campo) {
+    if (ordenDB.campo === campo) {
+        ordenDB.direccion = ordenDB.direccion === 'asc' ? 'desc' : 'asc';
+    } else {
+        ordenDB.campo = campo;
+        ordenDB.direccion = (campo === 'eficienciaPct') ? 'desc' : 'asc';
+    }
+    actualizarIndicadoresOrden();
+    aplicarFiltrosDB();
+}
+
+function actualizarIndicadoresOrden() {
+    ['nombre', 'zona', 'turno', 'eficienciaPct'].forEach(campo => {
+        const el = document.getElementById('ordenIcon-' + campo);
+        if (!el) return;
+        el.innerText = campo === ordenDB.campo ? (ordenDB.direccion === 'asc' ? '▲' : '▼') : '';
+    });
+}
+
+// --------------------------------------------------------
+// RENDER DE FILAS (con barra de progreso de eficiencia)
+// --------------------------------------------------------
+function renderizarFilasDB(operarios) {
     const tbody = document.getElementById('dbTableBody');
     if (!tbody) return;
 
     if (!operarios || operarios.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="py-6 text-center text-gray-500">No hay datos de operarios para mostrar.</td></tr>';
+        const hayDatos = currentOperariosData && currentOperariosData.length;
+        tbody.innerHTML = `<tr><td colspan="4" class="py-6 text-center text-gray-500">${hayDatos ? 'Ningún operario coincide con los filtros aplicados.' : 'No hay datos de operarios para mostrar.'}</td></tr>`;
         return;
     }
 
@@ -689,7 +784,9 @@ function RenderizarTablaDB(operarios) {
         const isDanger = op.eficienciaPct < 70;
 
         const colorEficiencia = isGoalMet ? 'text-brand-success' : (isDanger ? 'text-brand-danger' : 'text-brand-warning');
+        const colorBarra = isGoalMet ? 'bg-brand-success' : (isDanger ? 'bg-brand-danger' : 'bg-brand-warning');
         const rowHighlight = isDanger ? 'border-l-4 border-brand-danger bg-brand-danger/5' : 'border-l-4 border-transparent';
+        const anchoBarra = Math.max(0, Math.min(100, op.eficienciaPct));
 
         tableHtml += `
             <tr class="hover:bg-dark-800/50 transition-colors ${rowHighlight}">
@@ -697,8 +794,11 @@ function RenderizarTablaDB(operarios) {
                 <td class="p-3"><span class="px-2 py-1 rounded text-xs font-semibold ${style}">${escapeHtml(op.zona)}</span></td>
                 <td class="p-3 text-center text-gray-400 font-semibold text-xs tracking-wider uppercase">${escapeHtml(op.turno)}</td>
                 <td class="p-3 text-right">
-                    <div class="flex flex-col items-end">
+                    <div class="flex flex-col items-end gap-1">
                         <span class="font-bold ${colorEficiencia}">${op.eficienciaPct.toFixed(1)}%</span>
+                        <div class="w-28 h-1.5 bg-dark-700 rounded-full overflow-hidden">
+                            <div class="h-full ${colorBarra} rounded-full" style="width:${anchoBarra}%"></div>
+                        </div>
                         <span class="text-xs text-gray-500">${op.total.toLocaleString(LOCALE)} / ${op.objetivo.toLocaleString(LOCALE)} u.</span>
                     </div>
                 </td>
@@ -802,6 +902,38 @@ function cargarHistorial() {
         const raw = localStorage.getItem(HISTORY_KEY);
         return raw ? JSON.parse(raw) : [];
     } catch (e) { return []; }
+}
+
+// --------------------------------------------------------
+// COMPARACIÓN VS. LA CARGA ANTERIOR (usa el historial ya guardado)
+// La última entrada del historial siempre coincide con el estado
+// actualmente mostrado (guardarHistorial se llama junto con cada
+// actualización), así que la "carga anterior" es la anteúltima.
+// --------------------------------------------------------
+function renderizarComparacionKPIs() {
+    const hist = cargarHistorial();
+    const previo = hist.length >= 2 ? hist[hist.length - 2] : null;
+
+    Object.keys(CAMPOS_DELTA).forEach(campo => {
+        const el = document.getElementById('delta' + CAMPOS_DELTA[campo]);
+        if (!el) return;
+
+        if (!previo) { el.innerHTML = ''; return; }
+
+        const actual = currentOpsData[campo] || 0;
+        const anterior = previo[campo] || 0;
+
+        if (anterior === 0) {
+            el.innerHTML = actual > 0 ? '<span class="text-blue-400">● Nuevo</span>' : '';
+            return;
+        }
+
+        const deltaPct = ((actual - anterior) / anterior) * 100;
+        const subio = deltaPct >= 0;
+        const color = subio ? 'text-brand-success' : 'text-brand-danger';
+        const flecha = subio ? '▲' : '▼';
+        el.innerHTML = `<span class="${color} font-semibold">${flecha} ${Math.abs(deltaPct).toFixed(1)}%</span> <span class="text-gray-600">vs. anterior</span>`;
+    });
 }
 
 function guardarHistorial() {
