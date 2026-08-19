@@ -42,6 +42,12 @@ const OBJETIVOS_DEFAULT = {
     'Despacho': 1500
 };
 
+// campo en currentOpsData -> {id del div de delta, nombre de zona a mostrar}
+const CAMPOS_DELTA = {
+    abast: 'Abastecimiento', almac: 'Almacenamiento', pick: 'Picking',
+    ctrl: 'Control', desp: 'Despacho'
+};
+
 let barChartInstance = null;
 let doughnutChartInstance = null;
 let nominaGlobal = [];
@@ -129,6 +135,39 @@ function escapeHtml(str) {
 }
 
 // --------------------------------------------------------
+// NORMALIZACIÓN DE NOMBRES
+// Agrupa "Juan Perez", "juan  perez" y "JUAN PEREZ" bajo el
+// mismo operario. Sin esto, variaciones de mayúsculas o espacios
+// entre filas del mismo Excel parten a un operario en dos filas
+// distintas de la tabla de eficiencia.
+// --------------------------------------------------------
+function normalizarNombre(str) {
+    return String(str).toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+// --------------------------------------------------------
+// AVISOS FLOTANTES (TOASTS)
+// Usado, por ejemplo, cuando falla el guardado en localStorage
+// (storage lleno, modo privado, etc.) para que el usuario se
+// entere en vez de que falle en silencio (sólo console.warn).
+// --------------------------------------------------------
+function mostrarToast(mensaje, tipo) {
+    if (typeof document === 'undefined') return;
+    const cont = document.getElementById('toastContainer');
+    if (!cont) return;
+    const estilos = {
+        info: 'bg-blue-500/95 border-blue-400',
+        danger: 'bg-brand-danger/95 border-red-400',
+        success: 'bg-brand-success/95 border-emerald-400'
+    };
+    const toast = document.createElement('div');
+    toast.className = `${estilos[tipo] || estilos.info} text-white text-sm px-4 py-3 rounded-xl shadow-2xl border backdrop-blur-sm`;
+    toast.innerText = mensaje;
+    cont.appendChild(toast);
+    setTimeout(() => toast.remove(), 6000);
+}
+
+// --------------------------------------------------------
 // NÓMINA / TURNOS
 // Sin backend, la nómina se guarda localmente en el navegador:
 // se sube una vez (Excel/CSV con columnas Nombre y Turno) desde
@@ -153,7 +192,8 @@ async function cargarNominaDesdeBD() {
     }
 }
 function guardarNominaLocal(nomina) {
-    try { localStorage.setItem(NOMINA_KEY, JSON.stringify(nomina)); } catch (e) { /* noop */ }
+    try { localStorage.setItem(NOMINA_KEY, JSON.stringify(nomina)); }
+    catch (e) { mostrarToast('No se pudo guardar la nómina en este navegador.', 'danger'); }
 }
 function cargarNominaLocal() {
     try {
@@ -186,7 +226,8 @@ function cargarObjetivos() {
 }
 function guardarObjetivos(obj) {
     OBJETIVOS_ZONA = obj;
-    try { localStorage.setItem(OBJETIVOS_KEY, JSON.stringify(obj)); } catch (e) { /* noop */ }
+    try { localStorage.setItem(OBJETIVOS_KEY, JSON.stringify(obj)); }
+    catch (e) { mostrarToast('No se pudo guardar las metas en este navegador.', 'danger'); }
 }
 function llenarFormularioObjetivos() {
     const map = {
@@ -221,6 +262,9 @@ function recalcularEficiencia(operarios) {
 }
 
 // INICIALIZADOR AL CARGAR LA PÁGINA
+// (guardado tras "typeof document" para poder requerir este archivo
+// desde Node -sin DOM- y testear las funciones puras de más arriba)
+if (typeof document !== 'undefined') {
 document.addEventListener('DOMContentLoaded', async () => {
     if (typeof lucide !== 'undefined') lucide.createIcons();
     ConfigurarGraficosBase();
@@ -243,7 +287,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Se populan las notificaciones para que estén listas al abrir el panel,
     // pero sin encender el puntito rojo (no son "nuevas" en esta carga de página).
     generarNotificacionesEficiencia(currentOperariosData, false);
+    renderizarComparacionKPIs();
 });
+}
 
 // --------------------------------------------------------
 // SISTEMA DE PESTAÑAS (TABS)
@@ -289,7 +335,10 @@ function guardarEstado() {
             despachoEsOrdenesTR: despachoEsOrdenesTR
         };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-    } catch (e) { console.warn('Error guardando en localStorage:', e); }
+    } catch (e) {
+        console.warn('Error guardando en localStorage:', e);
+        mostrarToast('No se pudo guardar el estado en este navegador (¿modo privado o almacenamiento lleno?).', 'danger');
+    }
 }
 
 function cargarEstadoGuardado() {
@@ -325,6 +374,19 @@ function ActualizarDashboard(trData, abast, almac, pick, ctrl, desp) {
     // subiste el archivo de TR's, es un conteo de órdenes DISPATCHED (otra escala).
     const lblDespacho = document.getElementById('lblUnidadDespacho');
     if (lblDespacho) lblDespacho.innerText = despachoEsOrdenesTR ? 'órdenes (TR)' : 'unidades';
+
+    // Aviso visible (no sólo la etiqueta chica de la tarjeta) de que el número
+    // de Despacho no son unidades reales, para que no se lea como si lo fueran.
+    const avisoDesp = document.getElementById('avisoDespacho');
+    if (avisoDesp) {
+        if (despachoEsOrdenesTR) {
+            avisoDesp.classList.remove('hidden');
+            avisoDesp.innerHTML = '<b>La tarjeta DESPACHO muestra órdenes (TR), no unidades reales.</b> No se cargó el archivo de Flujo Operativo (o no tenía la columna de despacho), así que se usó el conteo de órdenes DISPATCHED del archivo de TR\'s como referencia.';
+        } else {
+            avisoDesp.classList.add('hidden');
+            avisoDesp.innerHTML = '';
+        }
+    }
 
     const sortedTR = Object.entries(trData).sort((a, b) => b[1] - a[1]);
     const labels = sortedTR.map(item => item[0].replace(/_/g, ' '));
@@ -451,6 +513,7 @@ async function procesarArchivos() {
         RenderizarTablaDB(currentOperariosData);
         guardarEstado();
         guardarHistorial();
+        renderizarComparacionKPIs();
         cerrarModalUpdate();
 
     } catch (error) {
@@ -565,19 +628,21 @@ function extraerOperariosDB(datos) {
         const totalFila = ing + gua + pick + ctrl + desp;
         if (totalFila === 0) return; // Se ignoran las filas que no suman operativas.
 
-        if (!operariosMap[nombre]) {
-            operariosMap[nombre] = { ing: 0, gua: 0, pick: 0, ctrl: 0, desp: 0 };
+        const claveNombre = normalizarNombre(nombre);
+        if (!operariosMap[claveNombre]) {
+            operariosMap[claveNombre] = { nombre, ing: 0, gua: 0, pick: 0, ctrl: 0, desp: 0 };
         }
 
-        operariosMap[nombre].ing += ing;
-        operariosMap[nombre].gua += gua;
-        operariosMap[nombre].pick += pick;
-        operariosMap[nombre].ctrl += ctrl;
-        operariosMap[nombre].desp += desp;
+        operariosMap[claveNombre].ing += ing;
+        operariosMap[claveNombre].gua += gua;
+        operariosMap[claveNombre].pick += pick;
+        operariosMap[claveNombre].ctrl += ctrl;
+        operariosMap[claveNombre].desp += desp;
     });
 
-    let operarios = Object.keys(operariosMap).map(nombre => {
-        const op = operariosMap[nombre];
+    let operarios = Object.keys(operariosMap).map(claveNombre => {
+        const op = operariosMap[claveNombre];
+        const nombre = op.nombre;
         const total = op.ing + op.gua + op.pick + op.ctrl + op.desp;
 
         let zona = 'Sin Asignar';
@@ -592,7 +657,7 @@ function extraerOperariosDB(datos) {
         const eficienciaPct = (total / objetivo) * 100;
 
         // Cruce con la nómina cargada (local o backend, ver cargarNominaDesdeBD)
-        const operarioEnNomina = nominaGlobal.find(n => n.nombre && n.nombre.toLowerCase() === nombre.toLowerCase());
+        const operarioEnNomina = nominaGlobal.find(n => n.nombre && normalizarNombre(n.nombre) === claveNombre);
         const turnoAsignado = operarioEnNomina ? operarioEnNomina.turno : 'Sin Turno';
 
         return { nombre, total, zona, objetivo, eficienciaPct, turno: turnoAsignado };
@@ -604,12 +669,99 @@ function extraerOperariosDB(datos) {
 // --------------------------------------------------------
 // RENDERIZAR TABLA DE EFICIENCIA (Con Alertas Visuales)
 // --------------------------------------------------------
+let ordenDB = { campo: 'eficienciaPct', direccion: 'desc' };
+
 function RenderizarTablaDB(operarios) {
+    currentOperariosData = operarios || [];
+    poblarFiltroTurnosDB(currentOperariosData);
+    actualizarIndicadoresOrden();
+    aplicarFiltrosDB();
+}
+
+// --------------------------------------------------------
+// FILTROS DE LA TABLA DB (nombre / zona / turno)
+// --------------------------------------------------------
+function poblarFiltroTurnosDB(operarios) {
+    const sel = document.getElementById('filtroTurnoDB');
+    if (!sel) return;
+    const valorActual = sel.value;
+    const turnos = [...new Set(operarios.map(op => op.turno))].sort((a, b) => a.localeCompare(b));
+    sel.innerHTML = '<option value="">Todos los turnos</option>' +
+        turnos.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+    if (turnos.includes(valorActual)) sel.value = valorActual;
+}
+
+function limpiarFiltrosDB() {
+    const nombreEl = document.getElementById('filtroNombreDB');
+    const zonaEl = document.getElementById('filtroZonaDB');
+    const turnoEl = document.getElementById('filtroTurnoDB');
+    if (nombreEl) nombreEl.value = '';
+    if (zonaEl) zonaEl.value = '';
+    if (turnoEl) turnoEl.value = '';
+    aplicarFiltrosDB();
+}
+
+function aplicarFiltrosDB() {
+    const nombreEl = document.getElementById('filtroNombreDB');
+    const zonaEl = document.getElementById('filtroZonaDB');
+    const turnoEl = document.getElementById('filtroTurnoDB');
+
+    const nombreFiltro = nombreEl ? normalizarNombre(nombreEl.value) : '';
+    const zonaFiltro = zonaEl ? zonaEl.value : '';
+    const turnoFiltro = turnoEl ? turnoEl.value : '';
+
+    let filtrados = (currentOperariosData || []).filter(op => {
+        if (nombreFiltro && !normalizarNombre(op.nombre).includes(nombreFiltro)) return false;
+        if (zonaFiltro && op.zona !== zonaFiltro) return false;
+        if (turnoFiltro && op.turno !== turnoFiltro) return false;
+        return true;
+    });
+
+    renderizarFilasDB(ordenarOperarios(filtrados));
+}
+
+// --------------------------------------------------------
+// ORDEN DE LA TABLA DB (clic en headers)
+// --------------------------------------------------------
+function ordenarOperarios(lista) {
+    const { campo, direccion } = ordenDB;
+    const factor = direccion === 'asc' ? 1 : -1;
+    return [...lista].sort((a, b) => {
+        const va = a[campo], vb = b[campo];
+        if (typeof va === 'string') return va.localeCompare(vb) * factor;
+        return (va - vb) * factor;
+    });
+}
+
+function ordenarPorColumna(campo) {
+    if (ordenDB.campo === campo) {
+        ordenDB.direccion = ordenDB.direccion === 'asc' ? 'desc' : 'asc';
+    } else {
+        ordenDB.campo = campo;
+        ordenDB.direccion = (campo === 'eficienciaPct') ? 'desc' : 'asc';
+    }
+    actualizarIndicadoresOrden();
+    aplicarFiltrosDB();
+}
+
+function actualizarIndicadoresOrden() {
+    ['nombre', 'zona', 'turno', 'eficienciaPct'].forEach(campo => {
+        const el = document.getElementById('ordenIcon-' + campo);
+        if (!el) return;
+        el.innerText = campo === ordenDB.campo ? (ordenDB.direccion === 'asc' ? '▲' : '▼') : '';
+    });
+}
+
+// --------------------------------------------------------
+// RENDER DE FILAS (con barra de progreso de eficiencia)
+// --------------------------------------------------------
+function renderizarFilasDB(operarios) {
     const tbody = document.getElementById('dbTableBody');
     if (!tbody) return;
 
     if (!operarios || operarios.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="py-6 text-center text-gray-500">No hay datos de operarios para mostrar.</td></tr>';
+        const hayDatos = currentOperariosData && currentOperariosData.length;
+        tbody.innerHTML = `<tr><td colspan="4" class="py-6 text-center text-gray-500">${hayDatos ? 'Ningún operario coincide con los filtros aplicados.' : 'No hay datos de operarios para mostrar.'}</td></tr>`;
         return;
     }
 
@@ -632,7 +784,9 @@ function RenderizarTablaDB(operarios) {
         const isDanger = op.eficienciaPct < 70;
 
         const colorEficiencia = isGoalMet ? 'text-brand-success' : (isDanger ? 'text-brand-danger' : 'text-brand-warning');
+        const colorBarra = isGoalMet ? 'bg-brand-success' : (isDanger ? 'bg-brand-danger' : 'bg-brand-warning');
         const rowHighlight = isDanger ? 'border-l-4 border-brand-danger bg-brand-danger/5' : 'border-l-4 border-transparent';
+        const anchoBarra = Math.max(0, Math.min(100, op.eficienciaPct));
 
         tableHtml += `
             <tr class="hover:bg-dark-800/50 transition-colors ${rowHighlight}">
@@ -640,8 +794,11 @@ function RenderizarTablaDB(operarios) {
                 <td class="p-3"><span class="px-2 py-1 rounded text-xs font-semibold ${style}">${escapeHtml(op.zona)}</span></td>
                 <td class="p-3 text-center text-gray-400 font-semibold text-xs tracking-wider uppercase">${escapeHtml(op.turno)}</td>
                 <td class="p-3 text-right">
-                    <div class="flex flex-col items-end">
+                    <div class="flex flex-col items-end gap-1">
                         <span class="font-bold ${colorEficiencia}">${op.eficienciaPct.toFixed(1)}%</span>
+                        <div class="w-28 h-1.5 bg-dark-700 rounded-full overflow-hidden">
+                            <div class="h-full ${colorBarra} rounded-full" style="width:${anchoBarra}%"></div>
+                        </div>
                         <span class="text-xs text-gray-500">${op.total.toLocaleString(LOCALE)} / ${op.objetivo.toLocaleString(LOCALE)} u.</span>
                     </div>
                 </td>
@@ -747,6 +904,38 @@ function cargarHistorial() {
     } catch (e) { return []; }
 }
 
+// --------------------------------------------------------
+// COMPARACIÓN VS. LA CARGA ANTERIOR (usa el historial ya guardado)
+// La última entrada del historial siempre coincide con el estado
+// actualmente mostrado (guardarHistorial se llama junto con cada
+// actualización), así que la "carga anterior" es la anteúltima.
+// --------------------------------------------------------
+function renderizarComparacionKPIs() {
+    const hist = cargarHistorial();
+    const previo = hist.length >= 2 ? hist[hist.length - 2] : null;
+
+    Object.keys(CAMPOS_DELTA).forEach(campo => {
+        const el = document.getElementById('delta' + CAMPOS_DELTA[campo]);
+        if (!el) return;
+
+        if (!previo) { el.innerHTML = ''; return; }
+
+        const actual = currentOpsData[campo] || 0;
+        const anterior = previo[campo] || 0;
+
+        if (anterior === 0) {
+            el.innerHTML = actual > 0 ? '<span class="text-blue-400">● Nuevo</span>' : '';
+            return;
+        }
+
+        const deltaPct = ((actual - anterior) / anterior) * 100;
+        const subio = deltaPct >= 0;
+        const color = subio ? 'text-brand-success' : 'text-brand-danger';
+        const flecha = subio ? '▲' : '▼';
+        el.innerHTML = `<span class="${color} font-semibold">${flecha} ${Math.abs(deltaPct).toFixed(1)}%</span> <span class="text-gray-600">vs. anterior</span>`;
+    });
+}
+
 function guardarHistorial() {
     try {
         let hist = cargarHistorial();
@@ -763,7 +952,10 @@ function guardarHistorial() {
         });
         if (hist.length > 60) hist = hist.slice(hist.length - 60);
         localStorage.setItem(HISTORY_KEY, JSON.stringify(hist));
-    } catch (e) { console.warn('No se pudo guardar el historial:', e); }
+    } catch (e) {
+        console.warn('No se pudo guardar el historial:', e);
+        mostrarToast('No se pudo guardar el historial en este navegador.', 'danger');
+    }
 }
 
 function renderizarHistorial() {
@@ -814,3 +1006,14 @@ function abrirModalObjetivos() {
     document.getElementById('modalObjetivos').classList.remove('hidden');
 }
 function cerrarModalObjetivos() { document.getElementById('modalObjetivos').classList.add('hidden'); }
+
+// --------------------------------------------------------
+// EXPORTS (sólo para tests con Node; no afecta al navegador,
+// donde "module" no existe y este bloque no se ejecuta)
+// --------------------------------------------------------
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        parseNumero, escapeHtml, fixMojibake, normalizarNombre,
+        extraerDatosTR, extraerOperariosDB, sumarColumna, extraerNomina
+    };
+}
