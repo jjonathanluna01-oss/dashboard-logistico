@@ -22,7 +22,7 @@
     </script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/lucide@1.33.0"></script>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap"
         rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
@@ -172,6 +172,9 @@
                 </div>
                 <div id="avisoColumnas"
                     class="hidden mt-3 text-xs text-brand-warning bg-brand-warning/10 border border-brand-warning/30 rounded-lg px-3 py-2">
+                </div>
+                <div id="avisoDespacho"
+                    class="hidden mt-3 text-xs text-blue-300 bg-blue-500/10 border border-blue-500/30 rounded-lg px-3 py-2">
                 </div>
             </section>
 
@@ -332,6 +335,9 @@
             </button>
         </div>
     </div>
+
+    <!-- Contenedor de avisos flotantes (ej: fallo al guardar en localStorage) -->
+    <div id="toastContainer" class="fixed bottom-4 right-4 z-[70] flex flex-col gap-2 max-w-sm"></div>
 
     <script src="app.js"></script>
 </body>

@@ -129,6 +129,39 @@ function escapeHtml(str) {
 }
 
 // --------------------------------------------------------
+// NORMALIZACIÓN DE NOMBRES
+// Agrupa "Juan Perez", "juan  perez" y "JUAN PEREZ" bajo el
+// mismo operario. Sin esto, variaciones de mayúsculas o espacios
+// entre filas del mismo Excel parten a un operario en dos filas
+// distintas de la tabla de eficiencia.
+// --------------------------------------------------------
+function normalizarNombre(str) {
+    return String(str).toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+// --------------------------------------------------------
+// AVISOS FLOTANTES (TOASTS)
+// Usado, por ejemplo, cuando falla el guardado en localStorage
+// (storage lleno, modo privado, etc.) para que el usuario se
+// entere en vez de que falle en silencio (sólo console.warn).
+// --------------------------------------------------------
+function mostrarToast(mensaje, tipo) {
+    if (typeof document === 'undefined') return;
+    const cont = document.getElementById('toastContainer');
+    if (!cont) return;
+    const estilos = {
+        info: 'bg-blue-500/95 border-blue-400',
+        danger: 'bg-brand-danger/95 border-red-400',
+        success: 'bg-brand-success/95 border-emerald-400'
+    };
+    const toast = document.createElement('div');
+    toast.className = `${estilos[tipo] || estilos.info} text-white text-sm px-4 py-3 rounded-xl shadow-2xl border backdrop-blur-sm`;
+    toast.innerText = mensaje;
+    cont.appendChild(toast);
+    setTimeout(() => toast.remove(), 6000);
+}
+
+// --------------------------------------------------------
 // NÓMINA / TURNOS
 // Sin backend, la nómina se guarda localmente en el navegador:
 // se sube una vez (Excel/CSV con columnas Nombre y Turno) desde
@@ -153,7 +186,8 @@ async function cargarNominaDesdeBD() {
     }
 }
 function guardarNominaLocal(nomina) {
-    try { localStorage.setItem(NOMINA_KEY, JSON.stringify(nomina)); } catch (e) { /* noop */ }
+    try { localStorage.setItem(NOMINA_KEY, JSON.stringify(nomina)); }
+    catch (e) { mostrarToast('No se pudo guardar la nómina en este navegador.', 'danger'); }
 }
 function cargarNominaLocal() {
     try {
@@ -186,7 +220,8 @@ function cargarObjetivos() {
 }
 function guardarObjetivos(obj) {
     OBJETIVOS_ZONA = obj;
-    try { localStorage.setItem(OBJETIVOS_KEY, JSON.stringify(obj)); } catch (e) { /* noop */ }
+    try { localStorage.setItem(OBJETIVOS_KEY, JSON.stringify(obj)); }
+    catch (e) { mostrarToast('No se pudo guardar las metas en este navegador.', 'danger'); }
 }
 function llenarFormularioObjetivos() {
     const map = {
@@ -221,6 +256,9 @@ function recalcularEficiencia(operarios) {
 }
 
 // INICIALIZADOR AL CARGAR LA PÁGINA
+// (guardado tras "typeof document" para poder requerir este archivo
+// desde Node -sin DOM- y testear las funciones puras de más arriba)
+if (typeof document !== 'undefined') {
 document.addEventListener('DOMContentLoaded', async () => {
     if (typeof lucide !== 'undefined') lucide.createIcons();
     ConfigurarGraficosBase();
@@ -244,6 +282,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // pero sin encender el puntito rojo (no son "nuevas" en esta carga de página).
     generarNotificacionesEficiencia(currentOperariosData, false);
 });
+}
 
 // --------------------------------------------------------
 // SISTEMA DE PESTAÑAS (TABS)
@@ -289,7 +328,10 @@ function guardarEstado() {
             despachoEsOrdenesTR: despachoEsOrdenesTR
         };
         localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-    } catch (e) { console.warn('Error guardando en localStorage:', e); }
+    } catch (e) {
+        console.warn('Error guardando en localStorage:', e);
+        mostrarToast('No se pudo guardar el estado en este navegador (¿modo privado o almacenamiento lleno?).', 'danger');
+    }
 }
 
 function cargarEstadoGuardado() {
@@ -325,6 +367,19 @@ function ActualizarDashboard(trData, abast, almac, pick, ctrl, desp) {
     // subiste el archivo de TR's, es un conteo de órdenes DISPATCHED (otra escala).
     const lblDespacho = document.getElementById('lblUnidadDespacho');
     if (lblDespacho) lblDespacho.innerText = despachoEsOrdenesTR ? 'órdenes (TR)' : 'unidades';
+
+    // Aviso visible (no sólo la etiqueta chica de la tarjeta) de que el número
+    // de Despacho no son unidades reales, para que no se lea como si lo fueran.
+    const avisoDesp = document.getElementById('avisoDespacho');
+    if (avisoDesp) {
+        if (despachoEsOrdenesTR) {
+            avisoDesp.classList.remove('hidden');
+            avisoDesp.innerHTML = '<b>La tarjeta DESPACHO muestra órdenes (TR), no unidades reales.</b> No se cargó el archivo de Flujo Operativo (o no tenía la columna de despacho), así que se usó el conteo de órdenes DISPATCHED del archivo de TR\'s como referencia.';
+        } else {
+            avisoDesp.classList.add('hidden');
+            avisoDesp.innerHTML = '';
+        }
+    }
 
     const sortedTR = Object.entries(trData).sort((a, b) => b[1] - a[1]);
     const labels = sortedTR.map(item => item[0].replace(/_/g, ' '));
@@ -565,19 +620,21 @@ function extraerOperariosDB(datos) {
         const totalFila = ing + gua + pick + ctrl + desp;
         if (totalFila === 0) return; // Se ignoran las filas que no suman operativas.
 
-        if (!operariosMap[nombre]) {
-            operariosMap[nombre] = { ing: 0, gua: 0, pick: 0, ctrl: 0, desp: 0 };
+        const claveNombre = normalizarNombre(nombre);
+        if (!operariosMap[claveNombre]) {
+            operariosMap[claveNombre] = { nombre, ing: 0, gua: 0, pick: 0, ctrl: 0, desp: 0 };
         }
 
-        operariosMap[nombre].ing += ing;
-        operariosMap[nombre].gua += gua;
-        operariosMap[nombre].pick += pick;
-        operariosMap[nombre].ctrl += ctrl;
-        operariosMap[nombre].desp += desp;
+        operariosMap[claveNombre].ing += ing;
+        operariosMap[claveNombre].gua += gua;
+        operariosMap[claveNombre].pick += pick;
+        operariosMap[claveNombre].ctrl += ctrl;
+        operariosMap[claveNombre].desp += desp;
     });
 
-    let operarios = Object.keys(operariosMap).map(nombre => {
-        const op = operariosMap[nombre];
+    let operarios = Object.keys(operariosMap).map(claveNombre => {
+        const op = operariosMap[claveNombre];
+        const nombre = op.nombre;
         const total = op.ing + op.gua + op.pick + op.ctrl + op.desp;
 
         let zona = 'Sin Asignar';
@@ -592,7 +649,7 @@ function extraerOperariosDB(datos) {
         const eficienciaPct = (total / objetivo) * 100;
 
         // Cruce con la nómina cargada (local o backend, ver cargarNominaDesdeBD)
-        const operarioEnNomina = nominaGlobal.find(n => n.nombre && n.nombre.toLowerCase() === nombre.toLowerCase());
+        const operarioEnNomina = nominaGlobal.find(n => n.nombre && normalizarNombre(n.nombre) === claveNombre);
         const turnoAsignado = operarioEnNomina ? operarioEnNomina.turno : 'Sin Turno';
 
         return { nombre, total, zona, objetivo, eficienciaPct, turno: turnoAsignado };
@@ -763,7 +820,10 @@ function guardarHistorial() {
         });
         if (hist.length > 60) hist = hist.slice(hist.length - 60);
         localStorage.setItem(HISTORY_KEY, JSON.stringify(hist));
-    } catch (e) { console.warn('No se pudo guardar el historial:', e); }
+    } catch (e) {
+        console.warn('No se pudo guardar el historial:', e);
+        mostrarToast('No se pudo guardar el historial en este navegador.', 'danger');
+    }
 }
 
 function renderizarHistorial() {
@@ -814,3 +874,14 @@ function abrirModalObjetivos() {
     document.getElementById('modalObjetivos').classList.remove('hidden');
 }
 function cerrarModalObjetivos() { document.getElementById('modalObjetivos').classList.add('hidden'); }
+
+// --------------------------------------------------------
+// EXPORTS (sólo para tests con Node; no afecta al navegador,
+// donde "module" no existe y este bloque no se ejecuta)
+// --------------------------------------------------------
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        parseNumero, escapeHtml, fixMojibake, normalizarNombre,
+        extraerDatosTR, extraerOperariosDB, sumarColumna, extraerNomina
+    };
+}

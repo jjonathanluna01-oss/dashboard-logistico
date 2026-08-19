@@ -1,0 +1,9 @@
+{
+  "name": "dashboard-logistico",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Dashboard logistico Grupo Dexter (HTML/JS estatico, sin build)",
+  "scripts": {
+    "test": "node --test"
+  }
+}
