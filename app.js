@@ -90,6 +90,45 @@ function fixMojibake(str) {
 }
 
 // --------------------------------------------------------
+// PARSEO DE N\u00daMEROS
+// Number() s\u00f3lo entiende punto decimal. Si una columna de
+// cantidades viene como texto en formato AR ("1.234,56" o
+// "1234,56"), Number() da NaN y el dato se pierde en silencio
+// como si fuera 0. Esta funci\u00f3n normaliza antes de convertir.
+// --------------------------------------------------------
+function parseNumero(val) {
+    if (typeof val === 'number') return isNaN(val) ? 0 : val;
+    if (val == null) return 0;
+    let s = String(val).trim();
+    if (!s) return 0;
+    const tieneComa = s.includes(',');
+    const tienePunto = s.includes('.');
+    if (tieneComa && tienePunto) {
+        s = s.replace(/\./g, '').replace(',', '.'); // "1.234,56" -> "1234.56"
+    } else if (tieneComa && !tienePunto) {
+        s = s.replace(',', '.'); // "1234,56" -> "1234.56"
+    }
+    const n = Number(s);
+    return isNaN(n) ? 0 : n;
+}
+
+// --------------------------------------------------------
+// ESCAPE HTML
+// Nombres de operarios, estados de TR y turnos vienen de
+// archivos que sube el usuario y se insertan con innerHTML.
+// Sin escapar, una celda con "<img onerror=...>" se ejecutar\u00eda
+// en el navegador de quien vea el dashboard.
+// --------------------------------------------------------
+function escapeHtml(str) {
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+// --------------------------------------------------------
 // NÓMINA / TURNOS
 // Sin backend, la nómina se guarda localmente en el navegador:
 // se sube una vez (Excel/CSV con columnas Nombre y Turno) desde
@@ -300,7 +339,7 @@ function ActualizarDashboard(trData, abast, almac, pick, ctrl, desp) {
         const badgeClass = BADGE_COLORS[estado] || 'bg-dark-700 text-gray-300';
         trHtml += `
             <tr class="hover:bg-dark-800/50 transition-colors">
-                <td class="py-3"><span class="px-2 py-1 rounded text-xs font-semibold ${badgeClass}">${estado.replace(/_/g, ' ')}</span></td>
+                <td class="py-3"><span class="px-2 py-1 rounded text-xs font-semibold ${badgeClass}">${escapeHtml(estado.replace(/_/g, ' '))}</span></td>
                 <td class="py-3 text-right font-medium text-white">${cantidad.toLocaleString(LOCALE)}</td>
                 <td class="py-3 text-right text-gray-400">${porcentaje}%</td>
             </tr>`;
@@ -336,7 +375,7 @@ function renderizarLeyendaDoughnut(labels, values, colors, total) {
     cont.innerHTML = labels.map((l, i) => {
         const pct = total > 0 ? ((values[i] / total) * 100).toFixed(1) : '0.0';
         return `<li class="flex items-center justify-between">
-            <span class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full" style="background:${colors[i]}"></span>${l}</span>
+            <span class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full" style="background:${colors[i]}"></span>${escapeHtml(l)}</span>
             <span class="text-gray-400">${pct}%</span>
         </li>`;
     }).join('');
@@ -457,7 +496,7 @@ function sumarColumna(datos, alias) {
     const cols = Object.keys(datos[0]);
     const realName = cols.find(c => alias.some(a => a.toLowerCase() === fixMojibake(c).toLowerCase()));
     if (!realName) return { total: 0, encontrada: false };
-    const total = datos.reduce((sum, f) => sum + (Number(f[realName]) || 0), 0);
+    const total = datos.reduce((sum, f) => sum + parseNumero(f[realName]), 0);
     return { total, encontrada: true };
 }
 
@@ -481,7 +520,7 @@ function extraerDatosTR(datos) {
 
         if (keyEstado && keyCantidad) {
             est = fixMojibake(String(f[keyEstado])).trim();
-            cant = Number(f[keyCantidad]) || 0;
+            cant = parseNumero(f[keyCantidad]);
         } else {
             // Si no encuentra la columna por nombre, sólo asume que es un resumen
             // si la estructura tiene sentido (2 o 3 columnas). Evita leer un
@@ -489,7 +528,7 @@ function extraerDatosTR(datos) {
             const val = Object.values(f);
             if (val.length <= 3 && val.length >= 2) {
                 est = fixMojibake(String(val[0])).trim();
-                cant = Number(val[1]) || 0;
+                cant = parseNumero(val[1]);
             }
         }
 
@@ -507,14 +546,15 @@ function extraerDatosTR(datos) {
 function extraerOperariosDB(datos) {
     const buscarLlave = (fila, aliases) => {
         const key = Object.keys(fila).find(k => aliases.some(a => a.toLowerCase() === fixMojibake(k).toLowerCase()));
-        return key ? Number(fila[key]) || 0 : 0;
+        return key ? parseNumero(fila[key]) : 0;
     };
 
     const operariosMap = {};
 
     datos.forEach(fila => {
         const nombreCol = Object.keys(fila).find(k => ['nombre y apellido', 'nombre', 'operario'].includes(fixMojibake(k).toLowerCase()));
-        const nombre = nombreCol ? fixMojibake(String(fila[nombreCol])).trim() : 'Desconocido';
+        const nombreRaw = nombreCol ? fixMojibake(String(fila[nombreCol] || '')).trim() : '';
+        const nombre = nombreRaw || 'Desconocido';
 
         const ing = buscarLlave(fila, COLUMNAS_OPS.abastecimiento);
         const gua = buscarLlave(fila, COLUMNAS_OPS.almacenamiento);
@@ -596,9 +636,9 @@ function RenderizarTablaDB(operarios) {
 
         tableHtml += `
             <tr class="hover:bg-dark-800/50 transition-colors ${rowHighlight}">
-                <td class="p-3 font-medium text-white">${op.nombre}</td>
-                <td class="p-3"><span class="px-2 py-1 rounded text-xs font-semibold ${style}">${op.zona}</span></td>
-                <td class="p-3 text-center text-gray-400 font-semibold text-xs tracking-wider uppercase">${op.turno}</td>
+                <td class="p-3 font-medium text-white">${escapeHtml(op.nombre)}</td>
+                <td class="p-3"><span class="px-2 py-1 rounded text-xs font-semibold ${style}">${escapeHtml(op.zona)}</span></td>
+                <td class="p-3 text-center text-gray-400 font-semibold text-xs tracking-wider uppercase">${escapeHtml(op.turno)}</td>
                 <td class="p-3 text-right">
                     <div class="flex flex-col items-end">
                         <span class="font-bold ${colorEficiencia}">${op.eficienciaPct.toFixed(1)}%</span>
@@ -647,7 +687,7 @@ function generarNotificacionesEficiencia(operarios, mostrarBadge) {
     if (mejorOperario && mejorOperario.eficienciaPct > 0) {
         notifs.push({
             titulo: 'Top Eficiencia del Turno',
-            desc: `<b>${mejorOperario.nombre}</b> alcanzó un espectacular <b>${mejorOperario.eficienciaPct.toFixed(1)}%</b> en la zona de <b>${mejorOperario.zona}</b>.`,
+            desc: `<b>${escapeHtml(mejorOperario.nombre)}</b> alcanzó un espectacular <b>${mejorOperario.eficienciaPct.toFixed(1)}%</b> en la zona de <b>${escapeHtml(mejorOperario.zona)}</b>.`,
             tipo: 'success',
             icon: 'award',
             tiempo: 'Hace un momento'
@@ -664,7 +704,7 @@ function generarNotificacionesEficiencia(operarios, mostrarBadge) {
 
     if (operariosBajoRendimiento.length > 0) {
         const listaNombres = operariosBajoRendimiento.map(op =>
-            `<li>${op.nombre}: <b class="text-white">${op.eficienciaPct.toFixed(1)}%</b></li>`
+            `<li>${escapeHtml(op.nombre)}: <b class="text-white">${op.eficienciaPct.toFixed(1)}%</b></li>`
         ).join('');
 
         notifs.push({
@@ -750,7 +790,7 @@ function renderizarHistorial() {
                 <span>Control: <b class="text-gray-200">${(h.ctrl || 0).toLocaleString(LOCALE)}</b></span>
                 <span class="col-span-2">Despacho: <b class="text-gray-200">${(h.desp || 0).toLocaleString(LOCALE)} ${unidadDesp}</b></span>
             </div>
-            ${h.topOperario ? `<div class="mt-2 pt-2 border-t border-dark-700 text-gray-400">Top del día: <b class="text-brand-success">${h.topOperario}</b> (${(h.topEficiencia || 0).toFixed(1)}%)</div>` : ''}
+            ${h.topOperario ? `<div class="mt-2 pt-2 border-t border-dark-700 text-gray-400">Top del día: <b class="text-brand-success">${escapeHtml(h.topOperario)}</b> (${(h.topEficiencia || 0).toFixed(1)}%)</div>` : ''}
         </div>`;
     }).join('');
 }
