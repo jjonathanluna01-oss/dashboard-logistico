@@ -184,10 +184,27 @@
             </section>
 
             <section>
-                <h2
-                    class="text-sm font-semibold tracking-widest text-gray-400 uppercase mb-4 flex items-center gap-2 mt-8">
-                    <i data-lucide="layers" class="w-4 h-4 text-brand-accent"></i> Distribución de Estados TR's
-                </h2>
+                <div class="flex items-center justify-between mb-4 mt-8">
+                    <h2 class="text-sm font-semibold tracking-widest text-gray-400 uppercase flex items-center gap-2">
+                        <i data-lucide="layers" class="w-4 h-4 text-brand-accent"></i> Distribución de Estados TR's
+                    </h2>
+                    <div class="relative">
+                        <button onclick="toggleFiltroEstadosPanel()" id="btnFiltroEstados"
+                            class="glass-panel px-3 py-1.5 rounded-lg flex items-center gap-2 text-xs text-gray-300 hover:text-white border border-dark-700 hover:border-gray-500 transition-colors">
+                            <i data-lucide="filter" class="w-3.5 h-3.5"></i> Filtrar estados
+                            <span id="filtroEstadosBadge" class="hidden bg-brand-accent text-white text-[10px] font-bold rounded-full w-4 h-4 items-center justify-center"></span>
+                        </button>
+                        <div id="panelFiltroEstados"
+                            class="hidden absolute right-0 mt-2 w-64 glass-panel rounded-xl p-3 border border-dark-700 shadow-2xl z-50">
+                            <div class="flex justify-between items-center mb-2 text-xs pb-2 border-b border-dark-700">
+                                <button onclick="seleccionarTodosEstados()" class="text-blue-400 hover:underline">Todos</button>
+                                <span class="text-gray-600">|</span>
+                                <button onclick="limpiarFiltroEstados()" class="text-gray-400 hover:underline">Ninguno</button>
+                            </div>
+                            <div id="listaFiltroEstados" class="space-y-1.5 max-h-56 overflow-y-auto custom-scrollbar text-xs"></div>
+                        </div>
+                    </div>
+                </div>
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     <div class="glass-panel rounded-2xl p-6 lg:col-span-1 flex flex-col justify-center items-center">
                         <h3 class="text-white font-medium mb-4 w-full text-left">Top 5 Estados (Volumen)</h3>
@@ -269,6 +286,14 @@
                         <tbody id="dbTableBody" class="divide-y divide-dark-700">
                             <!-- Inyectado por JS -->
                         </tbody>
+                        <tfoot id="dbTableFoot" class="hidden">
+                            <tr class="border-t-2 border-dark-600 bg-dark-800/60">
+                                <td class="p-3 font-bold text-white" colspan="3">
+                                    Total <span id="dbTotalEtiqueta" class="text-gray-400 font-normal"></span>
+                                </td>
+                                <td class="p-3 text-right font-bold text-white"><span id="dbTotalUnidades">0</span> u.</td>
+                            </tr>
+                        </tfoot>
                     </table>
                 </div>
             </section>
