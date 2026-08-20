@@ -359,8 +359,11 @@ function ConfigurarGraficosBase() {
 // --------------------------------------------------------
 // ACTUALIZAR MÉTRICAS DEL DASHBOARD
 // --------------------------------------------------------
+let estadosSeleccionados = new Set(); // estados TR actualmente tildados en el filtro
+
 function ActualizarDashboard(trData, abast, almac, pick, ctrl, desp) {
     currentOpsData = { abast, almac, pick, ctrl, desp };
+    currentTRData = trData;
     guardarEstado();
 
     document.getElementById('cardAbastecimiento').innerText = abast.toLocaleString(LOCALE);
@@ -388,7 +391,87 @@ function ActualizarDashboard(trData, abast, almac, pick, ctrl, desp) {
         }
     }
 
-    const sortedTR = Object.entries(trData).sort((a, b) => b[1] - a[1]);
+    // Cada carga nueva empieza mostrando todos los estados (el set de estados
+    // puede cambiar de un archivo a otro, así que no tiene sentido arrastrar
+    // el filtro anterior).
+    estadosSeleccionados = new Set(Object.keys(currentTRData));
+    poblarFiltroEstados();
+    renderizarSeccionTR();
+}
+
+// --------------------------------------------------------
+// FILTRO DE ESTADOS TR (checkboxes en "Filtrar estados")
+// --------------------------------------------------------
+function filtrarEstados(trData) {
+    const filtrado = {};
+    Object.keys(trData).forEach(estado => {
+        if (estadosSeleccionados.has(estado)) filtrado[estado] = trData[estado];
+    });
+    return filtrado;
+}
+
+function toggleFiltroEstadosPanel() {
+    const panel = document.getElementById('panelFiltroEstados');
+    if (panel) panel.classList.toggle('hidden');
+}
+
+function poblarFiltroEstados() {
+    const cont = document.getElementById('listaFiltroEstados');
+    if (!cont) return;
+    const estados = Object.keys(currentTRData).sort();
+    cont.innerHTML = estados.map(estado => {
+        const checked = estadosSeleccionados.has(estado) ? 'checked' : '';
+        const estadoEscapado = escapeHtml(estado).replace(/'/g, '&#39;');
+        return `<label class="flex items-center gap-2 text-gray-300 hover:text-white cursor-pointer py-0.5">
+            <input type="checkbox" ${checked} onchange="toggleEstadoFiltro('${estadoEscapado}')"
+                class="rounded border-dark-600 bg-dark-900 text-brand-accent focus:ring-0 focus:ring-offset-0">
+            ${escapeHtml(estado.replace(/_/g, ' '))}
+        </label>`;
+    }).join('') || '<p class="text-gray-500 text-center py-2">Sin estados cargados todavía.</p>';
+    actualizarBadgeFiltroEstados();
+}
+
+function toggleEstadoFiltro(estado) {
+    if (estadosSeleccionados.has(estado)) estadosSeleccionados.delete(estado);
+    else estadosSeleccionados.add(estado);
+    actualizarBadgeFiltroEstados();
+    renderizarSeccionTR();
+}
+
+function seleccionarTodosEstados() {
+    estadosSeleccionados = new Set(Object.keys(currentTRData));
+    poblarFiltroEstados();
+    renderizarSeccionTR();
+}
+
+function limpiarFiltroEstados() {
+    estadosSeleccionados = new Set();
+    poblarFiltroEstados();
+    renderizarSeccionTR();
+}
+
+function actualizarBadgeFiltroEstados() {
+    const badge = document.getElementById('filtroEstadosBadge');
+    if (!badge) return;
+    const total = Object.keys(currentTRData).length;
+    const activos = estadosSeleccionados.size;
+    if (activos < total) {
+        badge.innerText = activos;
+        badge.classList.remove('hidden');
+        badge.classList.add('flex');
+    } else {
+        badge.classList.add('hidden');
+        badge.classList.remove('flex');
+    }
+}
+
+// --------------------------------------------------------
+// RENDER DE LA SECCIÓN TR (tabla + gráficos), según el filtro activo
+// --------------------------------------------------------
+function renderizarSeccionTR() {
+    const trDataFiltrada = filtrarEstados(currentTRData);
+
+    const sortedTR = Object.entries(trDataFiltrada).sort((a, b) => b[1] - a[1]);
     const labels = sortedTR.map(item => item[0].replace(/_/g, ' '));
     const dataValues = sortedTR.map(item => item[1]);
     const totalTRs = dataValues.reduce((acc, val) => acc + val, 0);
@@ -406,7 +489,8 @@ function ActualizarDashboard(trData, abast, almac, pick, ctrl, desp) {
                 <td class="py-3 text-right text-gray-400">${porcentaje}%</td>
             </tr>`;
     });
-    tbody.innerHTML = trHtml || '<tr><td colspan="3" class="py-6 text-center text-gray-500">Sin datos de TR\'s todavía.</td></tr>';
+    const sinEstadosCargados = Object.keys(currentTRData).length === 0;
+    tbody.innerHTML = trHtml || `<tr><td colspan="3" class="py-6 text-center text-gray-500">${sinEstadosCargados ? 'Sin datos de TR\'s todavía.' : 'Ningún estado coincide con el filtro aplicado.'}</td></tr>`;
 
     if (barChartInstance) barChartInstance.destroy();
     barChartInstance = new Chart(document.getElementById('trBarChart'), {
@@ -757,11 +841,13 @@ function actualizarIndicadoresOrden() {
 // --------------------------------------------------------
 function renderizarFilasDB(operarios) {
     const tbody = document.getElementById('dbTableBody');
+    const tfoot = document.getElementById('dbTableFoot');
     if (!tbody) return;
 
     if (!operarios || operarios.length === 0) {
         const hayDatos = currentOperariosData && currentOperariosData.length;
         tbody.innerHTML = `<tr><td colspan="4" class="py-6 text-center text-gray-500">${hayDatos ? 'Ningún operario coincide con los filtros aplicados.' : 'No hay datos de operarios para mostrar.'}</td></tr>`;
+        if (tfoot) tfoot.classList.add('hidden');
         return;
     }
 
@@ -805,6 +891,17 @@ function renderizarFilasDB(operarios) {
             </tr>`;
     });
     tbody.innerHTML = tableHtml;
+
+    // Total de unidades de lo que está actualmente listado (todos si no hay
+    // filtro, o sólo el turno/zona/búsqueda filtrada) — se actualiza solo.
+    if (tfoot) {
+        const totalUnidades = operarios.reduce((sum, op) => sum + op.total, 0);
+        const totalEl = document.getElementById('dbTotalUnidades');
+        const etiquetaEl = document.getElementById('dbTotalEtiqueta');
+        if (totalEl) totalEl.innerText = totalUnidades.toLocaleString(LOCALE);
+        if (etiquetaEl) etiquetaEl.innerText = `(${operarios.length} operario${operarios.length === 1 ? '' : 's'})`;
+        tfoot.classList.remove('hidden');
+    }
 }
 
 // --------------------------------------------------------
