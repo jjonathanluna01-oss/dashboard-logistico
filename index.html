@@ -297,6 +297,34 @@
                     </table>
                 </div>
             </section>
+
+            <section class="glass-panel rounded-2xl p-6">
+                <h2 class="text-lg font-bold text-white flex items-center gap-2 mb-1">
+                    <i data-lucide="bar-chart-3" class="text-brand-accent"></i> Análisis Final por Turno
+                </h2>
+                <p class="text-xs text-gray-500 mb-6">Comparativa de unidades producidas por cada turno en Abastecimiento, Almacenamiento, Picking y Control (no incluye Despacho). La corona marca al turno líder en cada tarea.</p>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+                    <div class="overflow-x-auto custom-scrollbar">
+                        <table class="w-full text-left text-sm whitespace-nowrap">
+                            <thead class="text-gray-400 border-b border-dark-700">
+                                <tr>
+                                    <th class="p-3 font-medium">Turno</th>
+                                    <th class="p-3 font-medium text-right">Abastecimiento</th>
+                                    <th class="p-3 font-medium text-right">Almacenamiento</th>
+                                    <th class="p-3 font-medium text-right">Picking</th>
+                                    <th class="p-3 font-medium text-right">Control</th>
+                                    <th class="p-3 font-medium text-right">Total</th>
+                                </tr>
+                            </thead>
+                            <tbody id="turnosComparativaBody" class="divide-y divide-dark-700"></tbody>
+                        </table>
+                    </div>
+                    <div class="h-72 w-full">
+                        <canvas id="turnosComparativaChart"></canvas>
+                    </div>
+                </div>
+            </section>
         </div>
 
     </main>

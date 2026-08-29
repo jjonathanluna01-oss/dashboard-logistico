@@ -9,6 +9,7 @@ const {
     extraerOperariosDB,
     sumarColumna,
     extraerNomina,
+    calcularProductividadPorTurno,
 } = require('../app.js');
 
 test('parseNumero: numeros ya numericos pasan igual', () => {
@@ -123,4 +124,24 @@ test('extraerNomina: celda de nombre vacia (defval 0) no rompe el filtro', () =>
     const nomina = extraerNomina(datos);
     assert.equal(nomina.length, 1);
     assert.equal(nomina[0].nombre, 'Juan Perez');
+});
+
+test('calcularProductividadPorTurno: suma por turno y zona, ignora Despacho y Sin Asignar', () => {
+    const operarios = [
+        { nombre: 'A', zona: 'Picking', turno: 'Mañana', total: 100 },
+        { nombre: 'B', zona: 'Picking', turno: 'Mañana', total: 50 },
+        { nombre: 'C', zona: 'Control', turno: 'Mañana', total: 30 },
+        { nombre: 'D', zona: 'Picking', turno: 'Tarde', total: 200 },
+        { nombre: 'E', zona: 'Despacho', turno: 'Mañana', total: 999 },
+        { nombre: 'F', zona: 'Sin Asignar', turno: 'Mañana', total: 999 },
+    ];
+    const resultado = calcularProductividadPorTurno(operarios);
+    assert.deepEqual(resultado['Mañana'], { Abastecimiento: 0, Almacenamiento: 0, Picking: 150, Control: 30 });
+    assert.deepEqual(resultado['Tarde'], { Abastecimiento: 0, Almacenamiento: 0, Picking: 200, Control: 0 });
+    assert.equal(resultado['Mañana'].Picking, 150);
+});
+
+test('calcularProductividadPorTurno: sin operarios en zonas comparables da objeto vacio', () => {
+    const operarios = [{ nombre: 'A', zona: 'Despacho', turno: 'Mañana', total: 500 }];
+    assert.deepEqual(calcularProductividadPorTurno(operarios), {});
 });

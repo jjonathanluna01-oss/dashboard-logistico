@@ -48,8 +48,21 @@ const CAMPOS_DELTA = {
     ctrl: 'Control', desp: 'Despacho'
 };
 
+// Zonas que entran en la comparativa de turnos (a pedido: sin Despacho,
+// que tiene su propia ambigüedad de unidad real vs. órdenes TR)
+const ZONAS_COMPARATIVA = ['Abastecimiento', 'Almacenamiento', 'Picking', 'Control'];
+// mismos colores que ya usan las tarjetas KPI y los badges de zona, para que
+// una zona se vea siempre igual en todo el dashboard
+const ZONA_COLOR_HEX = {
+    Abastecimiento: '#f59e0b',
+    Almacenamiento: '#e52329',
+    Picking: '#8b5cf6',
+    Control: '#10b981',
+};
+
 let barChartInstance = null;
 let doughnutChartInstance = null;
+let turnosChartInstance = null;
 let nominaGlobal = [];
 let OBJETIVOS_ZONA = cargarObjetivos();
 
@@ -760,6 +773,85 @@ function RenderizarTablaDB(operarios) {
     poblarFiltroTurnosDB(currentOperariosData);
     actualizarIndicadoresOrden();
     aplicarFiltrosDB();
+    renderizarComparativaTurnos(currentOperariosData);
+}
+
+// --------------------------------------------------------
+// ANÁLISIS FINAL POR TURNO
+// Compara, para cada turno, cuánto produjo en cada una de las
+// 4 tareas principales (se suma op.total de los operarios cuya
+// zona dominante es esa tarea). Usa siempre el dataset completo,
+// sin verse afectado por los filtros de la tabla de arriba.
+// --------------------------------------------------------
+function calcularProductividadPorTurno(operarios) {
+    const porTurno = {};
+    (operarios || []).forEach(op => {
+        if (!ZONAS_COMPARATIVA.includes(op.zona)) return; // ignora Despacho y Sin Asignar
+        if (!porTurno[op.turno]) {
+            porTurno[op.turno] = {};
+            ZONAS_COMPARATIVA.forEach(z => { porTurno[op.turno][z] = 0; });
+        }
+        porTurno[op.turno][op.zona] += op.total;
+    });
+    return porTurno;
+}
+
+function renderizarComparativaTurnos(operarios) {
+    const porTurno = calcularProductividadPorTurno(operarios);
+    const turnos = Object.keys(porTurno).sort((a, b) => a.localeCompare(b));
+
+    const tbody = document.getElementById('turnosComparativaBody');
+    if (tbody) {
+        if (!turnos.length) {
+            tbody.innerHTML = '<tr><td colspan="6" class="py-6 text-center text-gray-500">No hay datos suficientes para comparar turnos.</td></tr>';
+        } else {
+            const maximos = {};
+            ZONAS_COMPARATIVA.forEach(zona => {
+                maximos[zona] = Math.max(...turnos.map(t => porTurno[t][zona]));
+            });
+
+            tbody.innerHTML = turnos.map(turno => {
+                const datos = porTurno[turno];
+                const total = ZONAS_COMPARATIVA.reduce((sum, z) => sum + datos[z], 0);
+                const celdas = ZONAS_COMPARATIVA.map(zona => {
+                    const esLider = datos[zona] > 0 && datos[zona] === maximos[zona];
+                    return `<td class="p-3 text-right ${esLider ? 'text-white font-bold' : 'text-gray-300'}">
+                        ${datos[zona].toLocaleString(LOCALE)}${esLider ? ' <i data-lucide="crown" class="w-3 h-3 inline text-brand-warning align-text-top"></i>' : ''}
+                    </td>`;
+                }).join('');
+                return `<tr class="hover:bg-dark-800/50 transition-colors">
+                    <td class="p-3 font-medium text-white">${escapeHtml(turno)}</td>
+                    ${celdas}
+                    <td class="p-3 text-right font-bold text-white">${total.toLocaleString(LOCALE)}</td>
+                </tr>`;
+            }).join('');
+            if (typeof lucide !== 'undefined') lucide.createIcons();
+        }
+    }
+
+    const canvas = document.getElementById('turnosComparativaChart');
+    if (!canvas) return;
+    if (turnosChartInstance) { turnosChartInstance.destroy(); turnosChartInstance = null; }
+    if (!turnos.length) return;
+
+    turnosChartInstance = new Chart(canvas, {
+        type: 'bar',
+        data: {
+            labels: turnos,
+            datasets: ZONAS_COMPARATIVA.map(zona => ({
+                label: zona,
+                data: turnos.map(t => porTurno[t][zona]),
+                backgroundColor: ZONA_COLOR_HEX[zona],
+                borderRadius: 4,
+            }))
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: true, position: 'bottom', labels: { boxWidth: 10, padding: 12 } } },
+            scales: { x: { grid: { display: false } } }
+        }
+    });
 }
 
 // --------------------------------------------------------
@@ -1111,6 +1203,7 @@ function cerrarModalObjetivos() { document.getElementById('modalObjetivos').clas
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         parseNumero, escapeHtml, fixMojibake, normalizarNombre,
-        extraerDatosTR, extraerOperariosDB, sumarColumna, extraerNomina
+        extraerDatosTR, extraerOperariosDB, sumarColumna, extraerNomina,
+        calcularProductividadPorTurno
     };
 }
