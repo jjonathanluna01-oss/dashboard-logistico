@@ -10,6 +10,7 @@ const {
     sumarColumna,
     extraerNomina,
     calcularProductividadPorTurno,
+    combinarPorOperario,
 } = require('../app.js');
 
 test('parseNumero: numeros ya numericos pasan igual', () => {
@@ -174,4 +175,30 @@ test('calcularProductividadPorTurno: suma por turno y zona, ignora Despacho y Si
 test('calcularProductividadPorTurno: sin operarios en zonas comparables da objeto vacio', () => {
     const operarios = [{ nombre: 'A', zona: 'Despacho', turno: 'Mañana', total: 500 }];
     assert.deepEqual(calcularProductividadPorTurno(operarios), {});
+});
+
+test('combinarPorOperario: suma total y metas de las tareas de un mismo operario', () => {
+    const filas = [
+        { nombre: 'Brenda Centurion', zona: 'Abastecimiento', turno: 'Mañana', total: 1040, objetivo: 1600 },
+        { nombre: 'Brenda Centurion', zona: 'Control', turno: 'Mañana', total: 586, objetivo: 1500 },
+        { nombre: 'Brenda Centurion', zona: 'Despacho', turno: 'Mañana', total: 12, objetivo: 1500 },
+    ];
+    const combinado = combinarPorOperario(filas);
+    assert.equal(combinado.length, 1);
+    assert.equal(combinado[0].total, 1638); // 1040 + 586 + 12
+    assert.equal(combinado[0].objetivo, 4600); // 1600 + 1500 + 1500
+    assert.equal(Math.round(combinado[0].eficienciaPct * 100) / 100, Math.round((1638 / 4600 * 100) * 100) / 100);
+    assert.deepEqual(combinado[0].zonas, ['Abastecimiento', 'Control', 'Despacho']);
+});
+
+test('combinarPorOperario: no mezcla operarios distintos ni ve afectada por mayusculas', () => {
+    const filas = [
+        { nombre: 'Juan Perez', zona: 'Picking', turno: 'Mañana', total: 100, objetivo: 1000 },
+        { nombre: 'JUAN PEREZ', zona: 'Control', turno: 'Mañana', total: 50, objetivo: 1500 },
+        { nombre: 'Maria Lopez', zona: 'Picking', turno: 'Tarde', total: 300, objetivo: 1000 },
+    ];
+    const combinado = combinarPorOperario(filas);
+    assert.equal(combinado.length, 2);
+    const juan = combinado.find(o => o.nombre === 'Juan Perez');
+    assert.equal(juan.total, 150);
 });

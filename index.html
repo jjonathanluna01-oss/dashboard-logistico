@@ -275,6 +275,14 @@
                         class="bg-dark-800 border border-dark-700 hover:border-gray-500 text-gray-400 hover:text-white text-sm px-3 py-2 rounded-lg transition-colors flex items-center gap-1.5 shrink-0">
                         <i data-lucide="x" class="w-3.5 h-3.5"></i> Limpiar
                     </button>
+                    <button onclick="toggleVistaDB()" id="btnVistaDB" title="Combina las tareas de cada operario en una sola fila"
+                        class="bg-dark-800 border border-dark-700 hover:border-gray-500 text-gray-400 hover:text-white text-sm px-3 py-2 rounded-lg transition-colors flex items-center gap-1.5 shrink-0">
+                        <i data-lucide="layers" class="w-3.5 h-3.5"></i> <span id="btnVistaDBTexto">Vista: Por tarea</span>
+                    </button>
+                    <button onclick="exportarTablaDB()"
+                        class="bg-dark-800 border border-dark-700 hover:border-brand-success/50 text-gray-400 hover:text-brand-success text-sm px-3 py-2 rounded-lg transition-colors flex items-center gap-1.5 shrink-0">
+                        <i data-lucide="download" class="w-3.5 h-3.5"></i> Exportar
+                    </button>
                 </div>
 
                 <div class="overflow-x-auto custom-scrollbar">
