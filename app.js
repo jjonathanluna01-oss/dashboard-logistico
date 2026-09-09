@@ -777,6 +777,8 @@ function extraerOperariosDB(datos) {
 // RENDERIZAR TABLA DE EFICIENCIA (Con Alertas Visuales)
 // --------------------------------------------------------
 let ordenDB = { campo: 'eficienciaPct', direccion: 'desc' };
+let vistaDB = 'tarea'; // 'tarea' (una fila por tarea) | 'combinada' (una fila por operario)
+let ultimaVistaDB = []; // lo que está actualmente en pantalla (filtrado+ordenado+combinado), para exportar
 
 function RenderizarTablaDB(operarios) {
     currentOperariosData = operarios || [];
@@ -896,6 +898,9 @@ function aplicarFiltrosDB() {
     const zonaFiltro = zonaEl ? zonaEl.value : '';
     const turnoFiltro = turnoEl ? turnoEl.value : '';
 
+    // Los filtros se aplican siempre sobre las filas por tarea (así "filtrar
+    // por Picking" muestra sólo lo que se hizo en Picking, incluso en vista
+    // combinada); recién después se combina si corresponde.
     let filtrados = (currentOperariosData || []).filter(op => {
         if (nombreFiltro && !normalizarNombre(op.nombre).includes(nombreFiltro)) return false;
         if (zonaFiltro && op.zona !== zonaFiltro) return false;
@@ -903,7 +908,46 @@ function aplicarFiltrosDB() {
         return true;
     });
 
-    renderizarFilasDB(ordenarOperarios(filtrados));
+    const datosVista = vistaDB === 'combinada' ? combinarPorOperario(filtrados) : filtrados;
+    ultimaVistaDB = ordenarOperarios(datosVista);
+    renderizarFilasDB(ultimaVistaDB);
+}
+
+// --------------------------------------------------------
+// VISTA COMBINADA: junta las filas por tarea de un mismo
+// operario en una sola, sumando unidades y metas (la eficiencia
+// combinada = total hecho / suma de metas de las tareas que
+// realizó, no un promedio de porcentajes de escalas distintas).
+// --------------------------------------------------------
+function combinarPorOperario(operarios) {
+    const grupos = {};
+    operarios.forEach(op => {
+        const clave = normalizarNombre(op.nombre);
+        if (!grupos[clave]) {
+            grupos[clave] = { nombre: op.nombre, turno: op.turno, zonas: [], total: 0, objetivo: 0 };
+        }
+        grupos[clave].zonas.push(op.zona);
+        grupos[clave].total += op.total;
+        grupos[clave].objetivo += op.objetivo;
+    });
+    return Object.values(grupos).map(g => ({
+        nombre: g.nombre,
+        turno: g.turno,
+        zona: g.zonas.join(', '),
+        zonas: g.zonas,
+        total: g.total,
+        objetivo: g.objetivo,
+        eficienciaPct: g.objetivo > 0 ? (g.total / g.objetivo) * 100 : 0,
+    }));
+}
+
+function toggleVistaDB() {
+    vistaDB = vistaDB === 'tarea' ? 'combinada' : 'tarea';
+    const texto = document.getElementById('btnVistaDBTexto');
+    const btn = document.getElementById('btnVistaDB');
+    if (texto) texto.innerText = vistaDB === 'combinada' ? 'Vista: Combinada' : 'Vista: Por tarea';
+    if (btn) btn.classList.toggle('text-brand-accent', vistaDB === 'combinada');
+    aplicarFiltrosDB();
 }
 
 // --------------------------------------------------------
@@ -967,7 +1011,6 @@ function renderizarFilasDB(operarios) {
     let tableHtml = ''; // Se arma el HTML completo en variable y se inyecta una sola vez
 
     operarios.forEach((op) => {
-        const style = getZoneColor(op.zona);
         const isGoalMet = op.eficienciaPct >= 100;
         const isDanger = op.eficienciaPct < 70;
 
@@ -976,10 +1019,16 @@ function renderizarFilasDB(operarios) {
         const rowHighlight = isDanger ? 'border-l-4 border-brand-danger bg-brand-danger/5' : 'border-l-4 border-transparent';
         const anchoBarra = Math.max(0, Math.min(100, op.eficienciaPct));
 
+        // En vista combinada (op.zonas) un operario puede tener varias
+        // zonas: se muestra un badge por cada una en vez de un solo texto.
+        const badgesZona = (op.zonas || [op.zona]).map(z =>
+            `<span class="px-2 py-1 rounded text-xs font-semibold ${getZoneColor(z)} mr-1 mb-1 inline-block">${escapeHtml(z)}</span>`
+        ).join('');
+
         tableHtml += `
             <tr class="hover:bg-dark-800/50 transition-colors ${rowHighlight}">
                 <td class="p-3 font-medium text-white">${escapeHtml(op.nombre)}</td>
-                <td class="p-3"><span class="px-2 py-1 rounded text-xs font-semibold ${style}">${escapeHtml(op.zona)}</span></td>
+                <td class="p-3">${badgesZona}</td>
                 <td class="p-3 text-center text-gray-400 font-semibold text-xs tracking-wider uppercase">${escapeHtml(op.turno)}</td>
                 <td class="p-3 text-right">
                     <div class="flex flex-col items-end gap-1">
@@ -1005,9 +1054,45 @@ function renderizarFilasDB(operarios) {
         const totalEl = document.getElementById('dbTotalUnidades');
         const etiquetaEl = document.getElementById('dbTotalEtiqueta');
         if (totalEl) totalEl.innerText = totalUnidades.toLocaleString(LOCALE);
-        if (etiquetaEl) etiquetaEl.innerText = `(${operariosUnicos} operario${operariosUnicos === 1 ? '' : 's'}, ${operarios.length} tarea${operarios.length === 1 ? '' : 's'})`;
+        if (etiquetaEl) {
+            etiquetaEl.innerText = vistaDB === 'combinada'
+                ? `(${operariosUnicos} operario${operariosUnicos === 1 ? '' : 's'})`
+                : `(${operariosUnicos} operario${operariosUnicos === 1 ? '' : 's'}, ${operarios.length} tarea${operarios.length === 1 ? '' : 's'})`;
+        }
         tfoot.classList.remove('hidden');
     }
+}
+
+// --------------------------------------------------------
+// EXPORTAR LA TABLA DB A EXCEL
+// Exporta exactamente lo que se está viendo: respeta los filtros
+// de nombre/zona/turno, el orden de columna activo y si está en
+// vista "Por tarea" o "Combinada".
+// --------------------------------------------------------
+function exportarTablaDB() {
+    if (!ultimaVistaDB.length) {
+        alert('No hay datos para exportar (revisá los filtros aplicados).');
+        return;
+    }
+
+    const filasExport = ultimaVistaDB.map(op => ({
+        'Nombre y Apellido': op.nombre,
+        'Zona': op.zonas ? op.zonas.join(', ') : op.zona,
+        'Turno': op.turno,
+        'Total Unidades': op.total,
+        'Meta': op.objetivo,
+        'Eficiencia %': Number(op.eficienciaPct.toFixed(1)),
+    }));
+
+    const hoja = XLSX.utils.json_to_sheet(filasExport);
+    hoja['!cols'] = [{ wch: 28 }, { wch: 24 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 12 }];
+
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hoja, 'Eficiencia');
+
+    const fecha = new Date().toISOString().slice(0, 10);
+    const sufijoVista = vistaDB === 'combinada' ? 'combinada' : 'por_tarea';
+    XLSX.writeFile(libro, `eficiencia_operarios_${sufijoVista}_${fecha}.xlsx`);
 }
 
 // --------------------------------------------------------
@@ -1232,6 +1317,6 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         parseNumero, escapeHtml, fixMojibake, normalizarNombre,
         extraerDatosTR, extraerOperariosDB, sumarColumna, extraerNomina,
-        calcularProductividadPorTurno
+        calcularProductividadPorTurno, combinarPorOperario
     };
 }
