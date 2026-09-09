@@ -240,10 +240,14 @@
         <!-- ========================================== -->
         <div id="viewDB" class="space-y-8 hidden">
             <section class="glass-panel rounded-2xl p-6">
-                <div class="flex justify-between items-center mb-6">
+                <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 mb-6">
                     <h2 class="text-lg font-bold text-white flex items-center gap-2">
                         <i data-lucide="users" class="text-blue-500"></i> Eficiencia por Operario
                     </h2>
+                    <div class="flex items-center gap-2 text-xs text-gray-400">
+                        <i data-lucide="calendar" class="w-3.5 h-3.5 text-blue-400"></i>
+                        Fecha del reporte: <span id="fechaReporteDB" class="text-white font-semibold">Reporte Inicial</span>
+                    </div>
                 </div>
 
                 <!-- Filtros: nombre, zona, turno -->
