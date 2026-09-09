@@ -82,6 +82,36 @@ test('extraerOperariosDB: ignora filas sin datos operativos', () => {
     assert.equal(extraerOperariosDB(datos).length, 0);
 });
 
+test('extraerOperariosDB: separa las tareas de un mismo operario en filas distintas', () => {
+    // Caso real: un operario aparece en una sola fila del Excel con varias
+    // columnas de tarea cargadas a la vez (ingreso + control + despacho).
+    const datos = [{
+        'Nombre y Apellido': 'Brenda Centurion',
+        'Cantidad ingresada': 1040,
+        'Cantidad guardada': 0,
+        'Cantidad pickeada': 0,
+        'Cantidad controlada': 586,
+        'Cantidad Despachada': 12,
+    }];
+    const operarios = extraerOperariosDB(datos);
+    assert.equal(operarios.length, 3); // Abastecimiento, Control y Despacho; no Almacenamiento ni Picking (0)
+
+    const porZona = Object.fromEntries(operarios.map(op => [op.zona, op.total]));
+    assert.deepEqual(porZona, { Abastecimiento: 1040, Control: 586, Despacho: 12 });
+    operarios.forEach(op => assert.equal(op.nombre, 'Brenda Centurion'));
+});
+
+test('extraerOperariosDB: la misma tarea del mismo operario en dos filas se suma (no se duplica)', () => {
+    const datos = [
+        { 'Nombre y Apellido': 'Juan Perez', 'Cantidad pickeada': 100, 'Cantidad controlada': 20 },
+        { 'Nombre y Apellido': 'Juan Perez', 'Cantidad pickeada': 50 },
+    ];
+    const operarios = extraerOperariosDB(datos);
+    assert.equal(operarios.length, 2);
+    const porZona = Object.fromEntries(operarios.map(op => [op.zona, op.total]));
+    assert.deepEqual(porZona, { Picking: 150, Control: 20 });
+});
+
 test('extraerDatosTR: suma cantidades por estado usando columnas nombradas', () => {
     const datos = [
         { 'Estado': 'DISPATCHED', 'Cantidad Solicitada': 10 },
