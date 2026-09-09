@@ -716,53 +716,50 @@ function extraerDatosTR(datos) {
 // --------------------------------------------------------
 // LÓGICA DE EXTRACCIÓN DB (EFICIENCIA Y ZONA)
 // --------------------------------------------------------
+// Columnas del Excel -> zona, en el mismo orden que aparecen las tarjetas KPI
+const ZONA_COLUMNAS_DB = [
+    ['Abastecimiento', COLUMNAS_OPS.abastecimiento],
+    ['Almacenamiento', COLUMNAS_OPS.almacenamiento],
+    ['Picking', COLUMNAS_OPS.picking],
+    ['Control', COLUMNAS_OPS.control],
+    ['Despacho', COLUMNAS_OPS.despacho],
+];
+
 function extraerOperariosDB(datos) {
     const buscarLlave = (fila, aliases) => {
         const key = Object.keys(fila).find(k => aliases.some(a => a.toLowerCase() === fixMojibake(k).toLowerCase()));
         return key ? parseNumero(fila[key]) : 0;
     };
 
-    const operariosMap = {};
+    // Un operario que pickeó y también controló aparece en el Excel como
+    // UNA sola fila con ambas columnas cargadas (ej: Brenda Centurión con
+    // Cantidad ingresada=1040 y Cantidad controlada=586 en la misma fila).
+    // Antes se sumaban en un único total bajo la zona dominante, perdiendo
+    // el detalle; ahora se genera una fila por cada tarea con actividad,
+    // agrupada por operario + zona (por si el operario aparece en más de
+    // una fila del archivo, ej. un resumen por día).
+    const porOperarioYZona = {}; // clave: nombreNormalizado + '||' + zona
+    const nombreOriginal = {};   // nombreNormalizado -> nombre tal como se vio la primera vez
 
     datos.forEach(fila => {
         const nombreCol = Object.keys(fila).find(k => ['nombre y apellido', 'nombre', 'operario'].includes(fixMojibake(k).toLowerCase()));
         const nombreRaw = nombreCol ? fixMojibake(String(fila[nombreCol] || '')).trim() : '';
         const nombre = nombreRaw || 'Desconocido';
-
-        const ing = buscarLlave(fila, COLUMNAS_OPS.abastecimiento);
-        const gua = buscarLlave(fila, COLUMNAS_OPS.almacenamiento);
-        const pick = buscarLlave(fila, COLUMNAS_OPS.picking);
-        const ctrl = buscarLlave(fila, COLUMNAS_OPS.control);
-        const desp = buscarLlave(fila, COLUMNAS_OPS.despacho);
-
-        const totalFila = ing + gua + pick + ctrl + desp;
-        if (totalFila === 0) return; // Se ignoran las filas que no suman operativas.
-
         const claveNombre = normalizarNombre(nombre);
-        if (!operariosMap[claveNombre]) {
-            operariosMap[claveNombre] = { nombre, ing: 0, gua: 0, pick: 0, ctrl: 0, desp: 0 };
-        }
+        if (!nombreOriginal[claveNombre]) nombreOriginal[claveNombre] = nombre;
 
-        operariosMap[claveNombre].ing += ing;
-        operariosMap[claveNombre].gua += gua;
-        operariosMap[claveNombre].pick += pick;
-        operariosMap[claveNombre].ctrl += ctrl;
-        operariosMap[claveNombre].desp += desp;
+        ZONA_COLUMNAS_DB.forEach(([zona, aliases]) => {
+            const cantidad = buscarLlave(fila, aliases);
+            if (cantidad === 0) return; // sin actividad en esta tarea, no genera fila
+
+            const clave = claveNombre + '||' + zona;
+            if (!porOperarioYZona[clave]) porOperarioYZona[clave] = { claveNombre, zona, total: 0 };
+            porOperarioYZona[clave].total += cantidad;
+        });
     });
 
-    let operarios = Object.keys(operariosMap).map(claveNombre => {
-        const op = operariosMap[claveNombre];
-        const nombre = op.nombre;
-        const total = op.ing + op.gua + op.pick + op.ctrl + op.desp;
-
-        let zona = 'Sin Asignar';
-        let max = 0;
-        if (op.ing > max) { max = op.ing; zona = 'Abastecimiento'; }
-        if (op.gua > max) { max = op.gua; zona = 'Almacenamiento'; }
-        if (op.pick > max) { max = op.pick; zona = 'Picking'; }
-        if (op.ctrl > max) { max = op.ctrl; zona = 'Control'; }
-        if (op.desp > max) { max = op.desp; zona = 'Despacho'; }
-
+    let operarios = Object.values(porOperarioYZona).map(({ claveNombre, zona, total }) => {
+        const nombre = nombreOriginal[claveNombre];
         const objetivo = OBJETIVOS_ZONA[zona] || 1500;
         const eficienciaPct = (total / objetivo) * 100;
 
@@ -999,12 +996,16 @@ function renderizarFilasDB(operarios) {
 
     // Total de unidades de lo que está actualmente listado (todos si no hay
     // filtro, o sólo el turno/zona/búsqueda filtrada) — se actualiza solo.
+    // Un mismo operario puede tener varias filas (una por cada tarea que
+    // realizó), así que la cantidad de "operarios" se cuenta por nombre
+    // único, no por fila.
     if (tfoot) {
         const totalUnidades = operarios.reduce((sum, op) => sum + op.total, 0);
+        const operariosUnicos = new Set(operarios.map(op => normalizarNombre(op.nombre))).size;
         const totalEl = document.getElementById('dbTotalUnidades');
         const etiquetaEl = document.getElementById('dbTotalEtiqueta');
         if (totalEl) totalEl.innerText = totalUnidades.toLocaleString(LOCALE);
-        if (etiquetaEl) etiquetaEl.innerText = `(${operarios.length} operario${operarios.length === 1 ? '' : 's'})`;
+        if (etiquetaEl) etiquetaEl.innerText = `(${operariosUnicos} operario${operariosUnicos === 1 ? '' : 's'}, ${operarios.length} tarea${operarios.length === 1 ? '' : 's'})`;
         tfoot.classList.remove('hidden');
     }
 }
