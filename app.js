@@ -292,8 +292,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         currentOperariosData = guardado.operariosData || [];
         currentFechaReporte = guardado.fecha || currentFechaReporte;
         despachoEsOrdenesTR = guardado.despachoEsOrdenesTR || false;
-        document.getElementById('fechaReporte').innerText = currentFechaReporte;
     }
+    actualizarFechaReporte();
 
     ActualizarDashboard(currentTRData, currentOpsData.abast, currentOpsData.almac, currentOpsData.pick, currentOpsData.ctrl, currentOpsData.desp);
     RenderizarTablaDB(currentOperariosData);
@@ -333,6 +333,19 @@ function switchTab(tab) {
         btnDB.className = activeClass;
         btnDash.className = inactiveClass;
     }
+}
+
+// --------------------------------------------------------
+// FECHA DEL REPORTE
+// Se muestra en dos lugares (header y arriba de la tabla DB) para
+// que quede visible sin importar qué pestaña estés mandando en una
+// captura de pantalla.
+// --------------------------------------------------------
+function actualizarFechaReporte() {
+    const elHeader = document.getElementById('fechaReporte');
+    const elDB = document.getElementById('fechaReporteDB');
+    if (elHeader) elHeader.innerText = currentFechaReporte;
+    if (elDB) elDB.innerText = currentFechaReporte;
 }
 
 // --------------------------------------------------------
@@ -604,7 +617,7 @@ async function procesarArchivos() {
         mostrarAvisoColumnas(columnasFaltantes);
 
         currentFechaReporte = "Carga: " + new Date().toLocaleString(LOCALE, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
-        document.getElementById('fechaReporte').innerText = currentFechaReporte;
+        actualizarFechaReporte();
 
         ActualizarDashboard(currentTRData, nAbast, nAlmac, nPick, nCtrl, nDesp);
         RenderizarTablaDB(currentOperariosData);
