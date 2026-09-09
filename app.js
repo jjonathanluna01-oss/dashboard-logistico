@@ -1037,9 +1037,14 @@ function generarNotificacionesEficiencia(operarios, mostrarBadge) {
         return;
     }
 
-    const totalOperarios = operarios.length;
-    const mejorOperario = operarios[0];
-    const operariosDestacados = operarios.filter(op => op.eficienciaPct >= 100).length;
+    // Un mismo operario puede tener varias filas (una por tarea), así que
+    // "cuántos operarios" se cuenta por persona única, no por fila —
+    // si no, alguien que supera el 100% en dos tareas contaría como dos.
+    const totalOperarios = new Set(operarios.map(op => normalizarNombre(op.nombre))).size;
+    const mejorOperario = operarios[0]; // ya viene ordenado por eficienciaPct desc
+    const operariosDestacados = new Set(
+        operarios.filter(op => op.eficienciaPct >= 100).map(op => normalizarNombre(op.nombre))
+    ).size;
     const operariosBajoRendimiento = operarios.filter(op => op.eficienciaPct < 70);
 
     let notifs = [];
@@ -1056,15 +1061,17 @@ function generarNotificacionesEficiencia(operarios, mostrarBadge) {
 
     notifs.push({
         titulo: 'Rendimiento Global',
-        desc: `Actualmente, <b>${operariosDestacados} de ${totalOperarios} operarios</b> alcanzaron o superaron el objetivo productivo (100% de eficiencia).`,
+        desc: `Actualmente, <b>${operariosDestacados} de ${totalOperarios} operarios</b> alcanzaron o superaron el objetivo productivo (100% de eficiencia) en al menos una tarea.`,
         tipo: 'info',
         icon: 'info',
         tiempo: 'Actualizado'
     });
 
     if (operariosBajoRendimiento.length > 0) {
+        // Se indica la zona junto al nombre porque un mismo operario puede
+        // aparecer más de una vez (una por cada tarea por debajo del 70%).
         const listaNombres = operariosBajoRendimiento.map(op =>
-            `<li>${escapeHtml(op.nombre)}: <b class="text-white">${op.eficienciaPct.toFixed(1)}%</b></li>`
+            `<li>${escapeHtml(op.nombre)} <span class="text-gray-500">(${escapeHtml(op.zona)})</span>: <b class="text-white">${op.eficienciaPct.toFixed(1)}%</b></li>`
         ).join('');
 
         notifs.push({
@@ -1142,15 +1149,22 @@ function renderizarComparacionKPIs() {
 function guardarHistorial() {
     try {
         let hist = cargarHistorial();
+        // currentOperariosData ya viene ordenado por eficienciaPct desc; un
+        // mismo operario puede tener varias filas (una por tarea), así que
+        // "totalOperarios" se cuenta por persona única, no por fila.
         const topOperario = currentOperariosData && currentOperariosData.length ? currentOperariosData[0] : null;
+        const totalOperariosUnicos = currentOperariosData
+            ? new Set(currentOperariosData.map(op => normalizarNombre(op.nombre))).size
+            : 0;
         hist.push({
             fecha: currentFechaReporte,
             timestamp: new Date().toISOString(),
             abast: currentOpsData.abast, almac: currentOpsData.almac, pick: currentOpsData.pick,
             ctrl: currentOpsData.ctrl, desp: currentOpsData.desp,
             despachoEsOrdenesTR: despachoEsOrdenesTR,
-            totalOperarios: currentOperariosData ? currentOperariosData.length : 0,
+            totalOperarios: totalOperariosUnicos,
             topOperario: topOperario ? topOperario.nombre : null,
+            topZona: topOperario ? topOperario.zona : null,
             topEficiencia: topOperario ? topOperario.eficienciaPct : null,
         });
         if (hist.length > 60) hist = hist.slice(hist.length - 60);
@@ -1185,7 +1199,7 @@ function renderizarHistorial() {
                 <span>Control: <b class="text-gray-200">${(h.ctrl || 0).toLocaleString(LOCALE)}</b></span>
                 <span class="col-span-2">Despacho: <b class="text-gray-200">${(h.desp || 0).toLocaleString(LOCALE)} ${unidadDesp}</b></span>
             </div>
-            ${h.topOperario ? `<div class="mt-2 pt-2 border-t border-dark-700 text-gray-400">Top del día: <b class="text-brand-success">${escapeHtml(h.topOperario)}</b> (${(h.topEficiencia || 0).toFixed(1)}%)</div>` : ''}
+            ${h.topOperario ? `<div class="mt-2 pt-2 border-t border-dark-700 text-gray-400">Top del día: <b class="text-brand-success">${escapeHtml(h.topOperario)}</b>${h.topZona ? ` <span class="text-gray-500">(${escapeHtml(h.topZona)})</span>` : ''} (${(h.topEficiencia || 0).toFixed(1)}%)</div>` : ''}
         </div>`;
     }).join('');
 }
