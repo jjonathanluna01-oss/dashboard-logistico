@@ -762,12 +762,16 @@ function extraerDatosTR(datos) {
 // LÓGICA DE EXTRACCIÓN DB (EFICIENCIA Y ZONA)
 // --------------------------------------------------------
 // Columnas del Excel -> zona, en el mismo orden que aparecen las tarjetas KPI
+// Tareas que se miden por operario en la tabla DB. Despacho queda
+// afuera a propósito: en la operación de Grupo Dexter no se registra
+// despacho por persona (la columna "Cantidad Despachada" del export
+// del WMS trae un valor fijo para todos, no es dato real por operario).
+// El despacho sigue estando como tarjeta del dashboard y en los TR's.
 const ZONA_COLUMNAS_DB = [
     ['Abastecimiento', COLUMNAS_OPS.abastecimiento],
     ['Almacenamiento', COLUMNAS_OPS.almacenamiento],
     ['Picking', COLUMNAS_OPS.picking],
     ['Control', COLUMNAS_OPS.control],
-    ['Despacho', COLUMNAS_OPS.despacho],
 ];
 
 function extraerOperariosDB(datos) {
@@ -1486,6 +1490,10 @@ function armarReportePeriodo(entradas) {
         if (Array.isArray(eOps.operariosData) && eOps.operariosData.length) {
             diasConDetalle++;
             eOps.operariosData.forEach(op => {
+                // Despacho no se mide por operario (ver ZONA_COLUMNAS_DB). Se
+                // filtra acá también para que cargas viejas del historial, que
+                // sí guardaron filas de Despacho, no ensucien el reporte.
+                if (!ZONAS_COMPARATIVA.includes(op.zona)) return;
                 const clave = normalizarNombre(op.nombre) + '||' + op.zona;
                 if (!opMap[clave]) {
                     opMap[clave] = { nombre: op.nombre, zona: op.zona, turno: op.turno, total: 0, metaAcum: 0, dias: new Set() };

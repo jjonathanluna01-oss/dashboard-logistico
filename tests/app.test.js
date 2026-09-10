@@ -99,11 +99,20 @@ test('extraerOperariosDB: separa las tareas de un mismo operario en filas distin
         'Cantidad Despachada': 12,
     }];
     const operarios = extraerOperariosDB(datos);
-    assert.equal(operarios.length, 3); // Abastecimiento, Control y Despacho; no Almacenamiento ni Picking (0)
+    // Abastecimiento y Control; Despacho NO se mide por operario (la columna
+    // trae un valor fijo para todos en el export del WMS).
+    assert.equal(operarios.length, 2);
 
     const porZona = Object.fromEntries(operarios.map(op => [op.zona, op.total]));
-    assert.deepEqual(porZona, { Abastecimiento: 1040, Control: 586, Despacho: 12 });
+    assert.deepEqual(porZona, { Abastecimiento: 1040, Control: 586 });
     operarios.forEach(op => assert.equal(op.nombre, 'Brenda Centurion'));
+});
+
+test('extraerOperariosDB: Despacho nunca genera fila por operario', () => {
+    const datos = [{ 'Nombre y Apellido': 'Enzo Arce', 'Cantidad Despachada': 12, 'Cantidad pickeada': 800 }];
+    const operarios = extraerOperariosDB(datos);
+    assert.equal(operarios.length, 1);
+    assert.equal(operarios[0].zona, 'Picking');
 });
 
 test('extraerOperariosDB: la misma tarea del mismo operario en dos filas se suma (no se duplica)', () => {
