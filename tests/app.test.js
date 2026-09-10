@@ -11,6 +11,10 @@ const {
     extraerNomina,
     calcularProductividadPorTurno,
     combinarPorOperario,
+    armarReportePeriodo,
+    fechaLocalISO,
+    lunesDeLaSemana,
+    rangoPreset,
 } = require('../app.js');
 
 test('parseNumero: numeros ya numericos pasan igual', () => {
@@ -201,4 +205,99 @@ test('combinarPorOperario: no mezcla operarios distintos ni ve afectada por mayu
     assert.equal(combinado.length, 2);
     const juan = combinado.find(o => o.nombre === 'Juan Perez');
     assert.equal(juan.total, 150);
+});
+
+// --- Reporte de período ---
+
+function entrada(dia, opsData, opts) {
+    return Object.assign({
+        dia,
+        timestamp: dia + 'T21:00:00.000Z',
+        opsActualizado: true,
+        abast: 0, almac: 0, pick: 0, ctrl: 0, desp: 0,
+        operariosData: opsData || [],
+        trData: {},
+    }, opts || {});
+}
+
+test('armarReportePeriodo: acumula operaciones y productividad por operario a lo largo de los dias', () => {
+    const entradas = [
+        entrada('2026-09-07',
+            [{ nombre: 'Juan Perez', total: 800, zona: 'Picking', objetivo: 1000, turno: 'Mañana' }],
+            { pick: 800 }),
+        entrada('2026-09-08',
+            [{ nombre: 'Juan Perez', total: 1200, zona: 'Picking', objetivo: 1000, turno: 'Mañana' }],
+            { pick: 1200 }),
+    ];
+    const rep = armarReportePeriodo(entradas);
+    assert.equal(rep.dias.length, 2);
+    assert.equal(rep.operaciones.pick, 2000);
+    assert.equal(rep.operarios.length, 1);
+    assert.equal(rep.operarios[0].total, 2000);
+    assert.equal(rep.operarios[0].diasTrabajados, 2);
+    assert.equal(rep.operarios[0].promedioDiario, 1000);
+    assert.equal(rep.operarios[0].metaPeriodo, 2000); // 1000 x 2 dias
+    assert.equal(rep.operarios[0].eficienciaPct, 100);
+});
+
+test('armarReportePeriodo: si un dia tiene 2 cargas, se queda con la ultima', () => {
+    const entradas = [
+        entrada('2026-09-07', [{ nombre: 'Ana', total: 500, zona: 'Control', objetivo: 1500, turno: 'Tarde' }], { ctrl: 500, timestamp: '2026-09-07T12:00:00.000Z' }),
+        entrada('2026-09-07', [{ nombre: 'Ana', total: 900, zona: 'Control', objetivo: 1500, turno: 'Tarde' }], { ctrl: 900, timestamp: '2026-09-07T19:00:00.000Z' }),
+    ];
+    const rep = armarReportePeriodo(entradas);
+    assert.equal(rep.dias.length, 1);
+    assert.equal(rep.operaciones.ctrl, 900);
+    assert.equal(rep.operarios[0].total, 900);
+    assert.equal(rep.operarios[0].diasTrabajados, 1);
+});
+
+test('armarReportePeriodo: una carga solo-TR no pisa el detalle de operarios del dia', () => {
+    const entradas = [
+        entrada('2026-09-07', [{ nombre: 'Ana', total: 900, zona: 'Control', objetivo: 1500, turno: 'Tarde' }], { ctrl: 900, timestamp: '2026-09-07T12:00:00.000Z' }),
+        entrada('2026-09-07', [], { opsActualizado: false, trData: { DISPATCHED: 50 }, timestamp: '2026-09-07T20:00:00.000Z' }),
+    ];
+    const rep = armarReportePeriodo(entradas);
+    assert.equal(rep.operaciones.ctrl, 900);      // de la carga con ops, no de la solo-TR
+    assert.equal(rep.operarios.length, 1);
+    assert.equal(rep.operarios[0].total, 900);
+    assert.equal(rep.trPeriodo.DISPATCHED, 50);   // el TR de la ultima carga si cuenta
+});
+
+test('armarReportePeriodo: comparativa por turno suma las 4 zonas principales del periodo', () => {
+    const entradas = [
+        entrada('2026-09-07', [
+            { nombre: 'A', total: 1000, zona: 'Picking', objetivo: 1000, turno: 'Mañana' },
+            { nombre: 'B', total: 500, zona: 'Control', objetivo: 1500, turno: 'Mañana' },
+            { nombre: 'C', total: 300, zona: 'Despacho', objetivo: 1500, turno: 'Mañana' },
+        ]),
+    ];
+    const rep = armarReportePeriodo(entradas);
+    assert.deepEqual(rep.porTurno['Mañana'], { Abastecimiento: 0, Almacenamiento: 0, Picking: 1000, Control: 500 });
+});
+
+test('armarReportePeriodo: entradas sin operariosData (formato viejo) no rompen', () => {
+    const rep = armarReportePeriodo([{ dia: '2026-09-01', timestamp: '2026-09-01T21:00:00Z', abast: 100 }]);
+    assert.equal(rep.operaciones.abast, 100);
+    assert.equal(rep.operarios.length, 0);
+    assert.equal(rep.dias.length, 1);
+});
+
+test('fechaLocalISO: formatea la fecha local como YYYY-MM-DD', () => {
+    assert.equal(fechaLocalISO(new Date(2026, 8, 5)), '2026-09-05'); // mes 8 = septiembre
+    assert.match(fechaLocalISO(), /^\d{4}-\d{2}-\d{2}$/);
+});
+
+test('lunesDeLaSemana: devuelve el lunes de esa semana', () => {
+    // 2026-09-10 es jueves -> lunes 2026-09-07
+    assert.equal(fechaLocalISO(lunesDeLaSemana(new Date(2026, 8, 10))), '2026-09-07');
+    // un domingo (2026-09-13) -> lunes anterior 2026-09-07
+    assert.equal(fechaLocalISO(lunesDeLaSemana(new Date(2026, 8, 13))), '2026-09-07');
+});
+
+test('rangoPreset: "semana" va del lunes a hoy; "7dias" son 7 dias corridos', () => {
+    const hoy = new Date(2026, 8, 10); // jueves
+    assert.deepEqual(rangoPreset('semana', hoy), { desde: '2026-09-07', hasta: '2026-09-10' });
+    assert.deepEqual(rangoPreset('7dias', hoy), { desde: '2026-09-04', hasta: '2026-09-10' });
+    assert.deepEqual(rangoPreset('semana-pasada', hoy), { desde: '2026-08-31', hasta: '2026-09-06' });
 });

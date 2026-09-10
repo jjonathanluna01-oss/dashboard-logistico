@@ -159,6 +159,49 @@ function normalizarNombre(str) {
 }
 
 // --------------------------------------------------------
+// FECHAS
+// Se guarda la fecha LOCAL (no la UTC de toISOString) porque una
+// carga a las 22 hs en Argentina caería en el día siguiente si se
+// usara UTC, rompiendo el agrupado por día del reporte semanal.
+// --------------------------------------------------------
+function fechaLocalISO(date) {
+    const d = date || new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${dd}`;
+}
+
+// Lunes (inicio de semana) de la semana que contiene `fecha`.
+function lunesDeLaSemana(fecha) {
+    const d = new Date(fecha);
+    d.setHours(0, 0, 0, 0);
+    const dia = d.getDay(); // 0=Dom, 1=Lun, ... 6=Sáb
+    d.setDate(d.getDate() + (dia === 0 ? -6 : 1 - dia));
+    return d;
+}
+
+// Devuelve { desde, hasta } en 'YYYY-MM-DD' para un preset.
+function rangoPreset(preset, hoy) {
+    const base = hoy || new Date();
+    if (preset === 'semana') {
+        return { desde: fechaLocalISO(lunesDeLaSemana(base)), hasta: fechaLocalISO(base) };
+    }
+    if (preset === 'semana-pasada') {
+        const lunesEsta = lunesDeLaSemana(base);
+        const lunesPasada = new Date(lunesEsta); lunesPasada.setDate(lunesPasada.getDate() - 7);
+        const domingoPasada = new Date(lunesEsta); domingoPasada.setDate(domingoPasada.getDate() - 1);
+        return { desde: fechaLocalISO(lunesPasada), hasta: fechaLocalISO(domingoPasada) };
+    }
+    if (preset === '7dias') {
+        const hace7 = new Date(base); hace7.setDate(hace7.getDate() - 6);
+        return { desde: fechaLocalISO(hace7), hasta: fechaLocalISO(base) };
+    }
+    // 'todo' se resuelve afuera (depende del historial); acá devolvemos un rango amplio
+    return { desde: '2000-01-01', hasta: fechaLocalISO(base) };
+}
+
+// --------------------------------------------------------
 // AVISOS FLOTANTES (TOASTS)
 // Usado, por ejemplo, cuando falla el guardado en localStorage
 // (storage lleno, modo privado, etc.) para que el usuario se
@@ -571,6 +614,7 @@ async function procesarArchivos() {
     try {
         let nAbast = currentOpsData.abast, nAlmac = currentOpsData.almac, nPick = currentOpsData.pick, nCtrl = currentOpsData.ctrl, nDesp = currentOpsData.desp;
         const columnasFaltantes = [];
+        let opsCargado = false; // ¿esta carga trajo un archivo de Flujo Operativo con filas?
 
         if (fileNomina) {
             const dataNomina = await leerExcel(fileNomina);
@@ -598,6 +642,7 @@ async function procesarArchivos() {
 
                 currentOperariosData = extraerOperariosDB(dataOps);
                 generarNotificacionesEficiencia(currentOperariosData, true);
+                opsCargado = true;
             } else {
                 columnasFaltantes.push('El archivo de Flujo Operativo no tiene filas de datos.');
             }
@@ -622,7 +667,7 @@ async function procesarArchivos() {
         ActualizarDashboard(currentTRData, nAbast, nAlmac, nPick, nCtrl, nDesp);
         RenderizarTablaDB(currentOperariosData);
         guardarEstado();
-        guardarHistorial();
+        guardarHistorial(opsCargado);
         renderizarComparacionKPIs();
         cerrarModalUpdate();
 
@@ -1231,7 +1276,7 @@ function renderizarComparacionKPIs() {
     });
 }
 
-function guardarHistorial() {
+function guardarHistorial(opsActualizado) {
     try {
         let hist = cargarHistorial();
         // currentOperariosData ya viene ordenado por eficienciaPct desc; un
@@ -1244,6 +1289,8 @@ function guardarHistorial() {
         hist.push({
             fecha: currentFechaReporte,
             timestamp: new Date().toISOString(),
+            dia: fechaLocalISO(),
+            opsActualizado: opsActualizado !== false, // undefined (llamadas viejas) => true
             abast: currentOpsData.abast, almac: currentOpsData.almac, pick: currentOpsData.pick,
             ctrl: currentOpsData.ctrl, desp: currentOpsData.desp,
             despachoEsOrdenesTR: despachoEsOrdenesTR,
@@ -1251,31 +1298,138 @@ function guardarHistorial() {
             topOperario: topOperario ? topOperario.nombre : null,
             topZona: topOperario ? topOperario.zona : null,
             topEficiencia: topOperario ? topOperario.eficienciaPct : null,
+            // Snapshot completo para poder armar el reporte semanal después.
+            operariosData: (currentOperariosData || []).map(op => ({
+                nombre: op.nombre, total: op.total, zona: op.zona,
+                objetivo: op.objetivo, turno: op.turno
+            })),
+            trData: Object.assign({}, currentTRData),
         });
         if (hist.length > 60) hist = hist.slice(hist.length - 60);
-        localStorage.setItem(HISTORY_KEY, JSON.stringify(hist));
+
+        // Con el snapshot de operarios cada entrada pesa más; si el storage
+        // se llena, se recorta el historial progresivamente antes de rendirse.
+        guardarConReintento(HISTORY_KEY, hist);
     } catch (e) {
         console.warn('No se pudo guardar el historial:', e);
         mostrarToast('No se pudo guardar el historial en este navegador.', 'danger');
     }
 }
 
-function renderizarHistorial() {
-    const cont = document.getElementById('listaHistorial');
-    if (!cont) return;
-    const hist = [...cargarHistorial()].reverse();
+// Intenta guardar; si el navegador rechaza por falta de espacio, va
+// recortando las entradas más viejas y reintenta.
+function guardarConReintento(clave, arr) {
+    let intento = [...arr];
+    for (let i = 0; i < 6; i++) {
+        try {
+            localStorage.setItem(clave, JSON.stringify(intento));
+            if (intento.length < arr.length) {
+                mostrarToast(`El historial se recortó a las últimas ${intento.length} cargas por falta de espacio en el navegador.`, 'info');
+            }
+            return;
+        } catch (e) {
+            if (intento.length <= 5) throw e;
+            intento = intento.slice(Math.ceil(intento.length / 2)); // descarta la mitad más vieja
+        }
+    }
+}
 
-    if (!hist.length) {
-        cont.innerHTML = '<p class="text-gray-500 text-center py-6 text-sm">Todavía no hay cargas guardadas. Subí datos desde "Actualizar Datos" para empezar a acumular historial.</p>';
-        return;
+let histTab = 'cargas';
+let reportePeriodoActual = null; // último reporte calculado, para exportar a PDF
+
+function diaDeEntrada(e) {
+    return (e && (e.dia || (e.timestamp || '').slice(0, 10))) || '';
+}
+
+function abrirModalHistorial() {
+    const r = rangoPreset('7dias');
+    const desdeEl = document.getElementById('histDesde');
+    const hastaEl = document.getElementById('histHasta');
+    if (desdeEl && !desdeEl.value) desdeEl.value = r.desde;
+    if (hastaEl && !hastaEl.value) hastaEl.value = r.hasta;
+    switchHistTab(histTab);
+    renderizarSeccionHistorial();
+    document.getElementById('modalHistorial').classList.remove('hidden');
+}
+function cerrarModalHistorial() { document.getElementById('modalHistorial').classList.add('hidden'); }
+function limpiarHistorial() {
+    if (!confirm('¿Borrar todo el historial guardado en este navegador?')) return;
+    localStorage.removeItem(HISTORY_KEY);
+    renderizarSeccionHistorial();
+}
+// alias por compatibilidad con llamadas viejas
+function renderizarHistorial() { renderizarSeccionHistorial(); }
+
+function switchHistTab(tab) {
+    histTab = tab;
+    const vCargas = document.getElementById('histViewCargas');
+    const vReporte = document.getElementById('histViewReporte');
+    const bCargas = document.getElementById('btnHistCargas');
+    const bReporte = document.getElementById('btnHistReporte');
+    const act = 'px-4 py-1.5 text-sm rounded-lg bg-dark-700/80 text-white font-medium border border-dark-600/50 transition-all';
+    const inact = 'px-4 py-1.5 text-sm rounded-lg text-gray-400 hover:text-white hover:bg-dark-700/50 transition-all border border-transparent';
+    const esReporte = tab === 'reporte';
+    if (vReporte) vReporte.classList.toggle('hidden', !esReporte);
+    if (vCargas) vCargas.classList.toggle('hidden', esReporte);
+    if (bReporte) bReporte.className = esReporte ? act : inact;
+    if (bCargas) bCargas.className = esReporte ? inact : act;
+}
+
+function setRangoHistorial(preset) {
+    let r;
+    if (preset === 'todo') {
+        const dias = cargarHistorial().map(diaDeEntrada).filter(Boolean).sort();
+        r = dias.length ? { desde: dias[0], hasta: dias[dias.length - 1] } : rangoPreset('7dias');
+    } else {
+        r = rangoPreset(preset);
+    }
+    const desdeEl = document.getElementById('histDesde');
+    const hastaEl = document.getElementById('histHasta');
+    if (desdeEl) desdeEl.value = r.desde;
+    if (hastaEl) hastaEl.value = r.hasta;
+    renderizarSeccionHistorial();
+}
+
+function filtrarHistorialPorRango(desde, hasta) {
+    return cargarHistorial().filter(e => {
+        const d = diaDeEntrada(e);
+        return d && (!desde || d >= desde) && (!hasta || d <= hasta);
+    });
+}
+
+function renderizarSeccionHistorial() {
+    const desde = (document.getElementById('histDesde') || {}).value || '';
+    const hasta = (document.getElementById('histHasta') || {}).value || '';
+    const entradas = filtrarHistorialPorRango(desde, hasta);
+
+    const resumenEl = document.getElementById('histRangoResumen');
+    if (resumenEl) {
+        const dias = new Set(entradas.map(diaDeEntrada)).size;
+        resumenEl.innerText = entradas.length
+            ? `· ${entradas.length} carga${entradas.length === 1 ? '' : 's'} en ${dias} día${dias === 1 ? '' : 's'}`
+            : '· sin cargas en este período';
     }
 
-    cont.innerHTML = hist.map(h => {
+    renderizarListaCargas(entradas);
+    reportePeriodoActual = armarReportePeriodo(entradas);
+    renderizarReportePeriodo(reportePeriodoActual);
+}
+
+function renderizarListaCargas(entradas) {
+    const cont = document.getElementById('listaHistorial');
+    if (!cont) return;
+    const lista = [...entradas].reverse();
+    if (!lista.length) {
+        cont.innerHTML = '<p class="text-gray-500 text-center py-6 text-sm">No hay cargas en este período. Probá ampliar el rango o tocar "Todo".</p>';
+        return;
+    }
+    cont.innerHTML = lista.map(h => {
         const unidadDesp = h.despachoEsOrdenesTR ? 'órdenes TR' : 'u.';
         return `
         <div class="bg-dark-900 border border-dark-700 rounded-xl p-3 text-xs">
             <div class="flex justify-between items-center mb-2">
-                <span class="text-white font-semibold">${h.fecha}</span>
+                <span class="text-white font-semibold">${escapeHtml(h.fecha || diaDeEntrada(h))}</span>
+                ${h.opsActualizado === false ? '<span class="text-[10px] text-brand-warning bg-brand-warning/10 px-1.5 py-0.5 rounded">sólo TR</span>' : ''}
             </div>
             <div class="grid grid-cols-2 gap-1.5 text-gray-400">
                 <span>Abastecimiento: <b class="text-gray-200">${(h.abast || 0).toLocaleString(LOCALE)}</b></span>
@@ -1289,15 +1443,397 @@ function renderizarHistorial() {
     }).join('');
 }
 
-function abrirModalHistorial() {
-    renderizarHistorial();
-    document.getElementById('modalHistorial').classList.remove('hidden');
+// --------------------------------------------------------
+// AGREGACIÓN DEL REPORTE DE PERÍODO (función pura, testeable)
+// Toma las entradas del historial de un rango y devuelve totales
+// operativos, productividad acumulada por operario, comparativa
+// por turno y estados TR del período.
+// --------------------------------------------------------
+function armarReportePeriodo(entradas) {
+    // Una entrada por día calendario. Para operación y detalle de
+    // operarios se prefiere la última carga del día que trajo un
+    // archivo de Flujo Operativo; para TR, la última del día.
+    const porDia = {};
+    (entradas || []).forEach(e => {
+        const dia = diaDeEntrada(e);
+        if (!dia) return;
+        if (!porDia[dia]) porDia[dia] = { ultima: e, conOps: null };
+        if ((e.timestamp || '') >= (porDia[dia].ultima.timestamp || '')) porDia[dia].ultima = e;
+        const tieneOps = e.opsActualizado !== false && Array.isArray(e.operariosData) && e.operariosData.length > 0;
+        if (tieneOps && (!porDia[dia].conOps || (e.timestamp || '') >= (porDia[dia].conOps.timestamp || ''))) {
+            porDia[dia].conOps = e;
+        }
+    });
+
+    const dias = Object.keys(porDia).sort();
+    const operaciones = { abast: 0, almac: 0, pick: 0, ctrl: 0, desp: 0 };
+    const operacionesPorDia = [];
+    const opMap = {};
+    const trPeriodo = {};
+    let diasConDetalle = 0;
+
+    dias.forEach(dia => {
+        const eOps = porDia[dia].conOps || porDia[dia].ultima;
+        const eUlt = porDia[dia].ultima;
+
+        ['abast', 'almac', 'pick', 'ctrl', 'desp'].forEach(k => { operaciones[k] += (eOps[k] || 0); });
+        operacionesPorDia.push({
+            dia,
+            abast: eOps.abast || 0, almac: eOps.almac || 0, pick: eOps.pick || 0,
+            ctrl: eOps.ctrl || 0, desp: eOps.desp || 0,
+        });
+
+        if (Array.isArray(eOps.operariosData) && eOps.operariosData.length) {
+            diasConDetalle++;
+            eOps.operariosData.forEach(op => {
+                const clave = normalizarNombre(op.nombre) + '||' + op.zona;
+                if (!opMap[clave]) {
+                    opMap[clave] = { nombre: op.nombre, zona: op.zona, turno: op.turno, total: 0, metaAcum: 0, dias: new Set() };
+                }
+                opMap[clave].total += (op.total || 0);
+                opMap[clave].metaAcum += (op.objetivo || 0);
+                opMap[clave].dias.add(dia);
+                if (op.turno) opMap[clave].turno = op.turno;
+            });
+        }
+
+        if (eUlt.trData && typeof eUlt.trData === 'object') {
+            Object.entries(eUlt.trData).forEach(([estado, cant]) => {
+                trPeriodo[estado] = (trPeriodo[estado] || 0) + (Number(cant) || 0);
+            });
+        }
+    });
+
+    const operarios = Object.values(opMap).map(o => {
+        const diasTrab = o.dias.size;
+        return {
+            nombre: o.nombre,
+            zona: o.zona,
+            turno: o.turno || 'Sin Turno',
+            total: o.total,
+            diasTrabajados: diasTrab,
+            promedioDiario: diasTrab ? Math.round(o.total / diasTrab) : 0,
+            metaPeriodo: o.metaAcum,
+            eficienciaPct: o.metaAcum > 0 ? (o.total / o.metaAcum) * 100 : 0,
+        };
+    }).sort((a, b) => b.eficienciaPct - a.eficienciaPct);
+
+    const porTurno = {};
+    operarios.forEach(op => {
+        if (!ZONAS_COMPARATIVA.includes(op.zona)) return;
+        if (!porTurno[op.turno]) { porTurno[op.turno] = {}; ZONAS_COMPARATIVA.forEach(z => porTurno[op.turno][z] = 0); }
+        porTurno[op.turno][op.zona] += op.total;
+    });
+
+    return {
+        dias,
+        rango: dias.length ? { desde: dias[0], hasta: dias[dias.length - 1] } : null,
+        cantidadCargas: (entradas || []).length,
+        diasConDetalle,
+        operaciones,
+        operacionesPorDia,
+        operarios,
+        operariosUnicos: new Set(operarios.map(o => normalizarNombre(o.nombre))).size,
+        porTurno,
+        trPeriodo,
+    };
 }
-function cerrarModalHistorial() { document.getElementById('modalHistorial').classList.add('hidden'); }
-function limpiarHistorial() {
-    if (!confirm('¿Borrar todo el historial guardado en este navegador?')) return;
-    localStorage.removeItem(HISTORY_KEY);
-    renderizarHistorial();
+
+function renderizarReportePeriodo(rep) {
+    const cont = document.getElementById('reportePeriodoContenido');
+    if (!cont) return;
+
+    if (!rep || !rep.dias.length) {
+        cont.innerHTML = '<p class="text-gray-500 text-center py-8 text-sm">No hay cargas en el período seleccionado para armar un reporte.</p>';
+        return;
+    }
+
+    const fmt = n => (n || 0).toLocaleString(LOCALE);
+    const rango = rep.rango ? `${rep.rango.desde} a ${rep.rango.hasta}` : '';
+    const o = rep.operaciones;
+    const totalOps = o.abast + o.almac + o.pick + o.ctrl + o.desp;
+
+    const tarjeta = (label, valor, color) => `
+        <div class="bg-dark-900 border border-dark-700 rounded-xl p-3">
+            <div class="text-[11px] text-gray-500 uppercase tracking-wide">${label}</div>
+            <div class="text-lg font-bold ${color}">${fmt(valor)}</div>
+        </div>`;
+
+    let html = `
+        <div>
+            <div class="flex items-baseline justify-between mb-2 flex-wrap gap-1">
+                <h4 class="text-white font-semibold text-sm">Resumen operativo del período</h4>
+                <span class="text-xs text-gray-500">${escapeHtml(rango)} · ${rep.dias.length} día${rep.dias.length === 1 ? '' : 's'} con carga</span>
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+                ${tarjeta('Abastecimiento', o.abast, 'text-brand-warning')}
+                ${tarjeta('Almacenamiento', o.almac, 'text-brand-accent')}
+                ${tarjeta('Picking', o.pick, 'text-brand-purple')}
+                ${tarjeta('Control', o.ctrl, 'text-brand-success')}
+                ${tarjeta('Despacho', o.desp, 'text-blue-400')}
+            </div>
+            <div class="text-xs text-gray-500 mt-2">Total operativo del período: <b class="text-white">${fmt(totalOps)}</b> u.</div>
+        </div>
+
+        <div>
+            <h4 class="text-white font-semibold text-sm mb-2">Operaciones por día</h4>
+            <div class="overflow-x-auto custom-scrollbar">
+                <table class="w-full text-left text-xs whitespace-nowrap">
+                    <thead class="text-gray-400 border-b border-dark-700"><tr>
+                        <th class="p-2">Día</th><th class="p-2 text-right">Abast.</th><th class="p-2 text-right">Almac.</th>
+                        <th class="p-2 text-right">Picking</th><th class="p-2 text-right">Control</th><th class="p-2 text-right">Despacho</th>
+                    </tr></thead>
+                    <tbody class="divide-y divide-dark-800">
+                        ${rep.operacionesPorDia.map(d => `<tr>
+                            <td class="p-2 text-gray-300">${d.dia}</td>
+                            <td class="p-2 text-right text-gray-300">${fmt(d.abast)}</td>
+                            <td class="p-2 text-right text-gray-300">${fmt(d.almac)}</td>
+                            <td class="p-2 text-right text-gray-300">${fmt(d.pick)}</td>
+                            <td class="p-2 text-right text-gray-300">${fmt(d.ctrl)}</td>
+                            <td class="p-2 text-right text-gray-300">${fmt(d.desp)}</td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>`;
+
+    if (rep.operarios.length) {
+        html += `
+        <div>
+            <div class="flex items-baseline justify-between mb-2 flex-wrap gap-1">
+                <h4 class="text-white font-semibold text-sm">Productividad por operario (${rep.operariosUnicos} operario${rep.operariosUnicos === 1 ? '' : 's'})</h4>
+                <span class="text-[11px] text-gray-500">efic. = total del período / (meta diaria × días trabajados)</span>
+            </div>
+            <div class="overflow-x-auto custom-scrollbar max-h-72 overflow-y-auto">
+                <table class="w-full text-left text-xs whitespace-nowrap">
+                    <thead class="text-gray-400 border-b border-dark-700 bg-dark-800/80 sticky top-0"><tr>
+                        <th class="p-2">Operario</th><th class="p-2">Turno</th><th class="p-2">Tarea</th>
+                        <th class="p-2 text-right">Total</th><th class="p-2 text-right">Días</th>
+                        <th class="p-2 text-right">Prom./día</th><th class="p-2 text-right">Efic.</th>
+                    </tr></thead>
+                    <tbody class="divide-y divide-dark-800">
+                        ${rep.operarios.map(op => {
+                            const c = op.eficienciaPct >= 100 ? 'text-brand-success' : (op.eficienciaPct < 70 ? 'text-brand-danger' : 'text-brand-warning');
+                            return `<tr>
+                                <td class="p-2 text-white">${escapeHtml(op.nombre)}</td>
+                                <td class="p-2 text-gray-400 uppercase text-[10px]">${escapeHtml(op.turno)}</td>
+                                <td class="p-2 text-gray-300">${escapeHtml(op.zona)}</td>
+                                <td class="p-2 text-right text-gray-200">${fmt(op.total)}</td>
+                                <td class="p-2 text-right text-gray-400">${op.diasTrabajados}</td>
+                                <td class="p-2 text-right text-gray-400">${fmt(op.promedioDiario)}</td>
+                                <td class="p-2 text-right font-bold ${c}">${op.eficienciaPct.toFixed(1)}%</td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>`;
+    } else {
+        html += `<div class="text-xs text-brand-warning bg-brand-warning/10 border border-brand-warning/30 rounded-lg px-3 py-2">
+            No hay detalle por operario en este período. El detalle por operario se guarda a partir de esta versión, así que va a estar disponible para las cargas nuevas.
+        </div>`;
+    }
+
+    const turnos = Object.keys(rep.porTurno).sort((a, b) => a.localeCompare(b));
+    if (turnos.length) {
+        const maximos = {};
+        ZONAS_COMPARATIVA.forEach(z => { maximos[z] = Math.max(...turnos.map(t => rep.porTurno[t][z])); });
+        html += `
+        <div>
+            <h4 class="text-white font-semibold text-sm mb-2">Comparativa por turno (Abast. + Almac. + Picking + Control)</h4>
+            <div class="overflow-x-auto custom-scrollbar">
+                <table class="w-full text-left text-xs whitespace-nowrap">
+                    <thead class="text-gray-400 border-b border-dark-700"><tr>
+                        <th class="p-2">Turno</th>${ZONAS_COMPARATIVA.map(z => `<th class="p-2 text-right">${z}</th>`).join('')}<th class="p-2 text-right">Total</th>
+                    </tr></thead>
+                    <tbody class="divide-y divide-dark-800">
+                        ${turnos.map(t => {
+                            const d = rep.porTurno[t];
+                            const tot = ZONAS_COMPARATIVA.reduce((s, z) => s + d[z], 0);
+                            return `<tr>
+                                <td class="p-2 text-white">${escapeHtml(t)}</td>
+                                ${ZONAS_COMPARATIVA.map(z => {
+                                    const lider = d[z] > 0 && d[z] === maximos[z];
+                                    return `<td class="p-2 text-right ${lider ? 'text-white font-bold' : 'text-gray-300'}">${fmt(d[z])}${lider ? ' 👑' : ''}</td>`;
+                                }).join('')}
+                                <td class="p-2 text-right font-bold text-white">${fmt(tot)}</td>
+                            </tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>`;
+    }
+
+    const trEntries = Object.entries(rep.trPeriodo).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+    if (trEntries.length) {
+        const totalTR = trEntries.reduce((s, [, v]) => s + v, 0);
+        html += `
+        <div>
+            <h4 class="text-white font-semibold text-sm mb-2">Estados de TR's (acumulado del período)</h4>
+            <div class="overflow-x-auto custom-scrollbar">
+                <table class="w-full text-left text-xs whitespace-nowrap">
+                    <thead class="text-gray-400 border-b border-dark-700"><tr><th class="p-2">Estado</th><th class="p-2 text-right">Cantidad</th><th class="p-2 text-right">%</th></tr></thead>
+                    <tbody class="divide-y divide-dark-800">
+                        ${trEntries.map(([est, v]) => `<tr>
+                            <td class="p-2 text-gray-300">${escapeHtml(est.replace(/_/g, ' '))}</td>
+                            <td class="p-2 text-right text-gray-200">${fmt(v)}</td>
+                            <td class="p-2 text-right text-gray-500">${totalTR ? ((v / totalTR) * 100).toFixed(1) : '0.0'}%</td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>
+            </div>
+        </div>`;
+    }
+
+    cont.innerHTML = html;
+    if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+// --------------------------------------------------------
+// GENERACIÓN DE PDF (jsPDF + autotable, cargados por CDN)
+// --------------------------------------------------------
+function pdfDisponible() {
+    return typeof window !== 'undefined' && window.jspdf && window.jspdf.jsPDF;
+}
+
+function nuevoPDF(titulo, subtitulo) {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.setTextColor(20);
+    doc.text('Grupo Dexter', 14, 15);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(11); doc.setTextColor(80);
+    doc.text(titulo, 14, 22);
+    let y = 27;
+    if (subtitulo) {
+        doc.setFontSize(8.5); doc.setTextColor(130);
+        doc.splitTextToSize(subtitulo, 180).forEach(linea => { doc.text(linea, 14, y); y += 4; });
+    }
+    doc.setTextColor(150); doc.setFontSize(7.5);
+    doc.text('Generado ' + new Date().toLocaleString(LOCALE), 14, y);
+    doc.__y = y + 5;
+    return doc;
+}
+
+function seccionPDF(doc, titulo, head, body, opts) {
+    if (doc.__y > 255) { doc.addPage(); doc.__y = 15; }
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(20);
+    doc.text(titulo, 14, doc.__y);
+    doc.autoTable(Object.assign({
+        head: [head], body,
+        startY: doc.__y + 2,
+        theme: 'grid',
+        styles: { fontSize: 7.5, cellPadding: 1.5 },
+        headStyles: { fillColor: [39, 39, 42], textColor: 255 },
+        margin: { left: 14, right: 14 },
+    }, opts || {}));
+    doc.__y = doc.lastAutoTable.finalY + 8;
+}
+
+const ALINEAR_DERECHA = idx => idx.reduce((acc, i) => { acc[i] = { halign: 'right' }; return acc; }, {});
+
+function exportarTablaDB() {
+    if (!ultimaVistaDB.length) {
+        alert('No hay datos para exportar (revisá los filtros aplicados).');
+        return;
+    }
+    if (!pdfDisponible()) { alert('No se pudo cargar el generador de PDF. Revisá tu conexión e intentá de nuevo.'); return; }
+
+    const filtros = [];
+    const fN = (document.getElementById('filtroNombreDB') || {}).value;
+    const fZ = (document.getElementById('filtroZonaDB') || {}).value;
+    const fT = (document.getElementById('filtroTurnoDB') || {}).value;
+    if (fN) filtros.push(`nombre "${fN}"`);
+    if (fZ) filtros.push(`zona ${fZ}`);
+    if (fT) filtros.push(`turno ${fT}`);
+
+    const sub = `Eficiencia por operario · vista ${vistaDB === 'combinada' ? 'combinada' : 'por tarea'}`
+        + (filtros.length ? ` · filtros: ${filtros.join(', ')}` : '')
+        + (currentFechaReporte ? ` · ${currentFechaReporte}` : '');
+
+    const doc = nuevoPDF('Reporte de eficiencia', sub);
+
+    const body = ultimaVistaDB.map(op => [
+        op.nombre,
+        op.zonas ? op.zonas.join(', ') : op.zona,
+        op.turno,
+        (op.total || 0).toLocaleString(LOCALE),
+        (op.objetivo || 0).toLocaleString(LOCALE),
+        op.eficienciaPct.toFixed(1) + '%',
+    ]);
+    const totalU = ultimaVistaDB.reduce((s, op) => s + op.total, 0);
+    body.push([
+        { content: 'TOTAL', colSpan: 3, styles: { fontStyle: 'bold' } },
+        { content: totalU.toLocaleString(LOCALE), styles: { fontStyle: 'bold', halign: 'right' } },
+        '', '',
+    ]);
+
+    seccionPDF(doc, 'Detalle', ['Nombre y Apellido', 'Zona', 'Turno', 'Total', 'Meta', 'Efic. %'], body,
+        { columnStyles: ALINEAR_DERECHA([3, 4, 5]) });
+
+    doc.save(`eficiencia_${vistaDB === 'combinada' ? 'combinada' : 'por_tarea'}_${fechaLocalISO()}.pdf`);
+}
+
+function exportarReportePeriodoPDF() {
+    const rep = reportePeriodoActual;
+    if (!rep || !rep.dias.length) { alert('No hay datos en el período seleccionado para exportar.'); return; }
+    if (!pdfDisponible()) { alert('No se pudo cargar el generador de PDF. Revisá tu conexión e intentá de nuevo.'); return; }
+
+    const fmt = n => (n || 0).toLocaleString(LOCALE);
+    const rango = rep.rango ? `${rep.rango.desde} a ${rep.rango.hasta}` : '';
+    const doc = nuevoPDF('Reporte de período', `${rango} · ${rep.dias.length} día(s) con carga · ${rep.cantidadCargas} carga(s) registrada(s)`);
+
+    const o = rep.operaciones;
+    const totalOps = o.abast + o.almac + o.pick + o.ctrl + o.desp;
+    seccionPDF(doc, 'Resumen operativo del período',
+        ['Tarea', 'Total del período'],
+        [
+            ['Abastecimiento', fmt(o.abast)],
+            ['Almacenamiento', fmt(o.almac)],
+            ['Picking', fmt(o.pick)],
+            ['Control', fmt(o.ctrl)],
+            ['Despacho', fmt(o.desp)],
+            [{ content: 'TOTAL OPERATIVO', styles: { fontStyle: 'bold' } }, { content: fmt(totalOps), styles: { fontStyle: 'bold', halign: 'right' } }],
+        ],
+        { columnStyles: ALINEAR_DERECHA([1]) });
+
+    seccionPDF(doc, 'Operaciones por día',
+        ['Día', 'Abast.', 'Almac.', 'Picking', 'Control', 'Despacho'],
+        rep.operacionesPorDia.map(d => [d.dia, fmt(d.abast), fmt(d.almac), fmt(d.pick), fmt(d.ctrl), fmt(d.desp)]),
+        { columnStyles: ALINEAR_DERECHA([1, 2, 3, 4, 5]) });
+
+    if (rep.operarios.length) {
+        seccionPDF(doc, `Productividad por operario (${rep.operariosUnicos} operario/s)`,
+            ['Operario', 'Turno', 'Tarea', 'Total', 'Días', 'Prom./día', 'Efic. %'],
+            rep.operarios.map(op => [
+                op.nombre, op.turno, op.zona, fmt(op.total),
+                String(op.diasTrabajados), fmt(op.promedioDiario), op.eficienciaPct.toFixed(1) + '%',
+            ]),
+            { columnStyles: ALINEAR_DERECHA([3, 4, 5, 6]) });
+    }
+
+    const turnos = Object.keys(rep.porTurno).sort((a, b) => a.localeCompare(b));
+    if (turnos.length) {
+        seccionPDF(doc, 'Comparativa por turno (Abast. + Almac. + Picking + Control)',
+            ['Turno', ...ZONAS_COMPARATIVA, 'Total'],
+            turnos.map(t => {
+                const d = rep.porTurno[t];
+                const tot = ZONAS_COMPARATIVA.reduce((s, z) => s + d[z], 0);
+                return [t, ...ZONAS_COMPARATIVA.map(z => fmt(d[z])), fmt(tot)];
+            }),
+            { columnStyles: ALINEAR_DERECHA([1, 2, 3, 4, 5]) });
+    }
+
+    const trEntries = Object.entries(rep.trPeriodo).filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]);
+    if (trEntries.length) {
+        const totalTR = trEntries.reduce((s, [, v]) => s + v, 0);
+        seccionPDF(doc, "Estados de TR's (acumulado del período)",
+            ['Estado', 'Cantidad', '%'],
+            trEntries.map(([e, v]) => [e.replace(/_/g, ' '), fmt(v), (totalTR ? (v / totalTR * 100).toFixed(1) : '0.0') + '%']),
+            { columnStyles: ALINEAR_DERECHA([1, 2]) });
+    }
+
+    doc.save(`reporte_periodo_${rep.rango ? rep.rango.desde + '_a_' + rep.rango.hasta : fechaLocalISO()}.pdf`);
 }
 
 // --------------------------------------------------------
@@ -1317,6 +1853,7 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         parseNumero, escapeHtml, fixMojibake, normalizarNombre,
         extraerDatosTR, extraerOperariosDB, sumarColumna, extraerNomina,
-        calcularProductividadPorTurno, combinarPorOperario
+        calcularProductividadPorTurno, combinarPorOperario,
+        armarReportePeriodo, fechaLocalISO, lunesDeLaSemana, rangoPreset
     };
 }
