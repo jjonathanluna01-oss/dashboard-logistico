@@ -6,6 +6,7 @@ const {
     fixMojibake,
     normalizarNombre,
     extraerDatosTR,
+    extraerRegistrosTR,
     extraerOperariosDB,
     sumarColumna,
     extraerNomina,
@@ -144,6 +145,30 @@ test('extraerDatosTR: ignora la fila de "Total General"', () => {
     ];
     const { estados } = extraerDatosTR(datos);
     assert.deepEqual(estados, { DISPATCHED: 10 });
+});
+
+test('extraerRegistrosTR: un registro por fila, con la fila cruda completa adentro (para la base de datos)', () => {
+    const datos = [
+        { 'Estado': 'DISPATCHED', 'Cantidad Solicitada': 10, 'N Orden': 'A1', 'Cliente': 'Acme' },
+        { 'Estado': 'CREATED', 'Cantidad Solicitada': 3, 'N Orden': 'A2', 'Cliente': 'Beta' },
+    ];
+    const { registros, columnasEncontradas } = extraerRegistrosTR(datos);
+    assert.equal(columnasEncontradas, true);
+    assert.equal(registros.length, 2);
+    assert.equal(registros[0].estado, 'DISPATCHED');
+    assert.equal(registros[0].cantidad, 10);
+    assert.deepEqual(registros[0].datos, datos[0]); // se guarda la fila entera, no solo estado+cantidad
+    assert.equal(registros[1].datos['Cliente'], 'Beta');
+});
+
+test('extraerRegistrosTR: extraerDatosTR sigue dando el mismo agregado (se arma sobre extraerRegistrosTR)', () => {
+    const datos = [
+        { 'Estado': 'DISPATCHED', 'Cantidad Solicitada': 10 },
+        { 'Estado': 'DISPATCHED', 'Cantidad Solicitada': 5 },
+        { 'Estado': 'CREATED', 'Cantidad Solicitada': 3 },
+    ];
+    assert.deepEqual(extraerDatosTR(datos).estados, { DISPATCHED: 15, CREATED: 3 });
+    assert.equal(extraerRegistrosTR(datos).registros.length, 3);
 });
 
 test('sumarColumna: encuentra la columna por alias sin importar mayusculas', () => {

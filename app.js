@@ -224,6 +224,77 @@ function mostrarToast(mensaje, tipo) {
 }
 
 // --------------------------------------------------------
+// BASE DE DATOS DE TR's (IndexedDB)
+// A pedido: guardar cada registro del archivo de Estados de TR's
+// completo (todas sus columnas), no sólo el resumen por estado, para
+// poder unificar y comparar el período entero después. Queda local
+// en el navegador de cada PC (no hay backend compartido) — IndexedDB
+// en vez de localStorage porque puede ser bastante más volumen de
+// datos que el resto de lo que guarda el dashboard.
+// --------------------------------------------------------
+const TR_DB_NOMBRE = 'dexterDashboard_trDB_v1';
+const TR_DB_VERSION = 1;
+const TR_DB_STORE = 'registros';
+
+function abrirBaseDeDatosTR() {
+    return new Promise((resolve, reject) => {
+        if (typeof indexedDB === 'undefined') { reject(new Error('IndexedDB no disponible en este navegador.')); return; }
+        const req = indexedDB.open(TR_DB_NOMBRE, TR_DB_VERSION);
+        req.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains(TR_DB_STORE)) {
+                const store = db.createObjectStore(TR_DB_STORE, { keyPath: 'id', autoIncrement: true });
+                store.createIndex('dia', 'dia', { unique: false });
+            }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+// registros: [{ estado, cantidad, datos }, ...] (salida de extraerRegistrosTR)
+function guardarRegistrosTR(registros, dia) {
+    if (!registros || !registros.length) return Promise.resolve();
+    return abrirBaseDeDatosTR().then(db => new Promise((resolve, reject) => {
+        const tx = db.transaction(TR_DB_STORE, 'readwrite');
+        const store = tx.objectStore(TR_DB_STORE);
+        const timestamp = new Date().toISOString();
+        registros.forEach(r => {
+            store.add({ dia, timestamp, estado: r.estado, cantidad: r.cantidad, datos: r.datos });
+        });
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+    }));
+}
+
+// Trae todos los registros con dia entre `desde` y `hasta` (inclusive, 'YYYY-MM-DD').
+function obtenerRegistrosTR(desde, hasta) {
+    return abrirBaseDeDatosTR().then(db => new Promise((resolve, reject) => {
+        const tx = db.transaction(TR_DB_STORE, 'readonly');
+        const idx = tx.objectStore(TR_DB_STORE).index('dia');
+        const rango = IDBKeyRange.bound(desde || '0000-01-01', hasta || '9999-12-31');
+        const out = [];
+        const req = idx.openCursor(rango);
+        req.onsuccess = (e) => {
+            const cursor = e.target.result;
+            if (cursor) { out.push(cursor.value); cursor.continue(); }
+            else resolve(out);
+        };
+        req.onerror = () => reject(req.error);
+    }));
+}
+
+function borrarBaseDeDatosTR() {
+    return abrirBaseDeDatosTR().then(db => new Promise((resolve, reject) => {
+        const tx = db.transaction(TR_DB_STORE, 'readwrite');
+        tx.objectStore(TR_DB_STORE).clear();
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+    }));
+}
+
+// --------------------------------------------------------
 // NÓMINA / TURNOS
 // Sin backend, la nómina se guarda localmente en el navegador:
 // se sube una vez (Excel/CSV con columnas Nombre y Turno) desde
@@ -650,10 +721,21 @@ async function procesarArchivos() {
 
         if (fileTR) {
             const dataTR = await leerExcel(fileTR);
-            const { estados: nuevosTR, columnasEncontradas } = extraerDatosTR(dataTR);
-            if (Object.keys(nuevosTR).length > 0) {
+            const { registros } = extraerRegistrosTR(dataTR);
+            if (registros.length > 0) {
+                const nuevosTR = {};
+                registros.forEach(r => { nuevosTR[r.estado] = (nuevosTR[r.estado] || 0) + r.cantidad; });
                 currentTRData = nuevosTR;
                 if (!fileOps && currentTRData["DISPATCHED"]) { nDesp = currentTRData["DISPATCHED"]; despachoEsOrdenesTR = true; }
+
+                // Guarda cada registro completo (todas sus columnas) en la base
+                // de datos local de TR's, para poder unificar el período después.
+                try {
+                    await guardarRegistrosTR(registros, fechaLocalISO());
+                } catch (e) {
+                    console.warn('No se pudo guardar en la base de datos de TR\'s:', e);
+                    mostrarToast('No se pudo guardar el detalle de TR\'s en la base de datos local de este navegador.', 'danger');
+                }
             } else {
                 columnasFaltantes.push('No se pudo interpretar el archivo de Estados de TR\'s (revisá que tenga columnas de Estado y Cantidad).');
             }
@@ -720,10 +802,13 @@ function sumarColumna(datos, alias) {
 
 // --------------------------------------------------------
 // EXTRACCIÓN TR (PARA ARCHIVOS EN CRUDO)
+// extraerRegistrosTR da un registro por fila (estado + cantidad +
+// la fila cruda completa, para guardar en la base de datos de TR's).
+// extraerDatosTR se arma sumando esos registros por estado, y es lo
+// que usan las tarjetas/gráficos del Dashboard (no cambió su salida).
 // --------------------------------------------------------
-function extraerDatosTR(datos) {
-    let nuevos = {};
-    if (!datos || datos.length === 0) return { estados: nuevos, columnasEncontradas: false };
+function extraerRegistrosTR(datos) {
+    if (!datos || datos.length === 0) return { registros: [], columnasEncontradas: false };
 
     const aliasesEstado = ['estado', 'estado tr'];
     const aliasesCantidad = ['cantidad solicitada', 'cantidad', 'cant. solicitada', 'solicitada'];
@@ -732,6 +817,7 @@ function extraerDatosTR(datos) {
     const keyEstado = cols.find(c => aliasesEstado.some(a => fixMojibake(c).toLowerCase().includes(a)));
     const keyCantidad = cols.find(c => aliasesCantidad.some(a => fixMojibake(c).toLowerCase().includes(a)));
 
+    const registros = [];
     datos.forEach(f => {
         let est = "";
         let cant = 0;
@@ -751,11 +837,18 @@ function extraerDatosTR(datos) {
         }
 
         if (est && est !== "0" && est !== "undefined" && !est.toLowerCase().includes("total general")) {
-            nuevos[est] = (nuevos[est] || 0) + cant;
+            registros.push({ estado: est, cantidad: cant, datos: f });
         }
     });
 
-    return { estados: nuevos, columnasEncontradas: !!(keyEstado && keyCantidad) };
+    return { registros, columnasEncontradas: !!(keyEstado && keyCantidad) };
+}
+
+function extraerDatosTR(datos) {
+    const { registros, columnasEncontradas } = extraerRegistrosTR(datos);
+    const estados = {};
+    registros.forEach(r => { estados[r.estado] = (estados[r.estado] || 0) + r.cantidad; });
+    return { estados, columnasEncontradas };
 }
 
 // --------------------------------------------------------
@@ -1366,17 +1459,19 @@ function renderizarHistorial() { renderizarSeccionHistorial(); }
 
 function switchHistTab(tab) {
     histTab = tab;
-    const vCargas = document.getElementById('histViewCargas');
-    const vReporte = document.getElementById('histViewReporte');
-    const bCargas = document.getElementById('btnHistCargas');
-    const bReporte = document.getElementById('btnHistReporte');
     const act = 'px-4 py-1.5 text-sm rounded-lg bg-dark-700/80 text-white font-medium border border-dark-600/50 transition-all';
     const inact = 'px-4 py-1.5 text-sm rounded-lg text-gray-400 hover:text-white hover:bg-dark-700/50 transition-all border border-transparent';
-    const esReporte = tab === 'reporte';
-    if (vReporte) vReporte.classList.toggle('hidden', !esReporte);
-    if (vCargas) vCargas.classList.toggle('hidden', esReporte);
-    if (bReporte) bReporte.className = esReporte ? act : inact;
-    if (bCargas) bCargas.className = esReporte ? inact : act;
+    [
+        ['cargas', 'histViewCargas', 'btnHistCargas'],
+        ['reporte', 'histViewReporte', 'btnHistReporte'],
+        ['basedatos', 'histViewBaseDatos', 'btnHistBaseDatos'],
+    ].forEach(([id, vistaId, btnId]) => {
+        const vista = document.getElementById(vistaId);
+        const btn = document.getElementById(btnId);
+        const activo = id === tab;
+        if (vista) vista.classList.toggle('hidden', !activo);
+        if (btn) btn.className = activo ? act : inact;
+    });
 }
 
 function setRangoHistorial(preset) {
@@ -1417,6 +1512,7 @@ function renderizarSeccionHistorial() {
     renderizarListaCargas(entradas);
     reportePeriodoActual = armarReportePeriodo(entradas);
     renderizarReportePeriodo(reportePeriodoActual);
+    renderizarBaseDeDatosTR(desde, hasta);
 }
 
 function renderizarListaCargas(entradas) {
@@ -1445,6 +1541,127 @@ function renderizarListaCargas(entradas) {
             ${h.topOperario ? `<div class="mt-2 pt-2 border-t border-dark-700 text-gray-400">Top del día: <b class="text-brand-success">${escapeHtml(h.topOperario)}</b>${h.topZona ? ` <span class="text-gray-500">(${escapeHtml(h.topZona)})</span>` : ''} (${(h.topEficiencia || 0).toFixed(1)}%)</div>` : ''}
         </div>`;
     }).join('');
+}
+
+// --------------------------------------------------------
+// VISTA "BASE DE DATOS" (registros crudos de TR's desde IndexedDB)
+// --------------------------------------------------------
+let ultimaBaseDatosTR = []; // lo último leído, para exportar a Excel
+
+function formatearValorCelda(v) {
+    if (v instanceof Date) return v.toLocaleDateString(LOCALE);
+    if (v == null) return '';
+    return String(v);
+}
+
+async function renderizarBaseDeDatosTR(desde, hasta) {
+    const cont = document.getElementById('baseDatosTRContenido');
+    const resumenEl = document.getElementById('baseDatosTRResumen');
+    if (!cont) return;
+
+    let registros = [];
+    try {
+        registros = await obtenerRegistrosTR(desde, hasta);
+    } catch (e) {
+        console.warn('No se pudo leer la base de datos de TR\'s:', e);
+        cont.innerHTML = '<p class="text-brand-danger text-center py-8 text-sm">No se pudo leer la base de datos local de este navegador.</p>';
+        if (resumenEl) resumenEl.innerText = '';
+        ultimaBaseDatosTR = [];
+        return;
+    }
+
+    ultimaBaseDatosTR = registros;
+
+    if (!registros.length) {
+        if (resumenEl) resumenEl.innerText = '0 registros en el período';
+        cont.innerHTML = '<p class="text-gray-500 text-center py-8 text-sm">No hay registros de TR\'s guardados en este período. Se van acumulando acá cada vez que subís el archivo de "Estados de TR\'s" desde "Actualizar Datos".</p>';
+        return;
+    }
+
+    if (resumenEl) {
+        const dias = new Set(registros.map(r => r.dia)).size;
+        resumenEl.innerText = `${registros.length.toLocaleString(LOCALE)} registro${registros.length === 1 ? '' : 's'} · ${dias} día${dias === 1 ? '' : 's'} con carga`;
+    }
+
+    // Resumen por estado sobre TODOS los registros del rango (no sólo los que se listan abajo)
+    const porEstado = {};
+    registros.forEach(r => {
+        if (!porEstado[r.estado]) porEstado[r.estado] = { cantidad: 0, registros: 0 };
+        porEstado[r.estado].cantidad += (r.cantidad || 0);
+        porEstado[r.estado].registros += 1;
+    });
+    const totalCant = Object.values(porEstado).reduce((a, b) => a + b.cantidad, 0);
+    const filasEstado = Object.entries(porEstado).sort((a, b) => b[1].cantidad - a[1].cantidad);
+
+    let html = `
+    <div>
+        <h4 class="text-white font-semibold text-sm mb-2">Resumen por estado (${registros.length.toLocaleString(LOCALE)} registros)</h4>
+        <div class="overflow-x-auto custom-scrollbar">
+            <table class="w-full text-left text-xs whitespace-nowrap">
+                <thead class="text-gray-400 border-b border-dark-700"><tr><th class="p-2">Estado</th><th class="p-2 text-right">Cantidad</th><th class="p-2 text-right">Registros</th><th class="p-2 text-right">%</th></tr></thead>
+                <tbody class="divide-y divide-dark-800">
+                    ${filasEstado.map(([est, d]) => `<tr>
+                        <td class="p-2 text-gray-300">${escapeHtml(est.replace(/_/g, ' '))}</td>
+                        <td class="p-2 text-right text-gray-200">${d.cantidad.toLocaleString(LOCALE)}</td>
+                        <td class="p-2 text-right text-gray-500">${d.registros.toLocaleString(LOCALE)}</td>
+                        <td class="p-2 text-right text-gray-500">${totalCant ? ((d.cantidad / totalCant) * 100).toFixed(1) : '0.0'}%</td>
+                    </tr>`).join('')}
+                </tbody>
+            </table>
+        </div>
+    </div>`;
+
+    // Detalle fila por fila con todas las columnas originales del Excel.
+    // Se limita lo que se pinta en pantalla para no trabar el navegador con
+    // miles de filas; el Excel exportado sí trae todo el rango completo.
+    const LIMITE_VISTA = 300;
+    const columnas = Object.keys(registros[0].datos || {});
+    const mostrar = registros.slice(0, LIMITE_VISTA);
+
+    html += `
+    <div>
+        <h4 class="text-white font-semibold text-sm mb-2">Detalle (todas las columnas del Excel)${registros.length > LIMITE_VISTA ? ` <span class="text-gray-500 font-normal text-xs">— mostrando ${LIMITE_VISTA} de ${registros.length.toLocaleString(LOCALE)}, exportá a Excel para verlos todos</span>` : ''}</h4>
+        <div class="overflow-x-auto custom-scrollbar">
+            <table class="w-full text-left text-xs whitespace-nowrap">
+                <thead class="text-gray-400 border-b border-dark-700 bg-dark-800/80 sticky top-0">
+                    <tr><th class="p-2">Día</th>${columnas.map(c => `<th class="p-2">${escapeHtml(fixMojibake(c))}</th>`).join('')}</tr>
+                </thead>
+                <tbody class="divide-y divide-dark-800">
+                    ${mostrar.map(r => `<tr>
+                        <td class="p-2 text-gray-400">${r.dia}</td>
+                        ${columnas.map(c => `<td class="p-2 text-gray-300">${escapeHtml(formatearValorCelda(r.datos[c]))}</td>`).join('')}
+                    </tr>`).join('')}
+                </tbody>
+            </table>
+        </div>
+    </div>`;
+
+    cont.innerHTML = html;
+}
+
+function exportarBaseDeDatosTR() {
+    if (!ultimaBaseDatosTR.length) { alert('No hay registros para exportar en este período.'); return; }
+
+    const filas = ultimaBaseDatosTR.map(r => Object.assign({ 'Día carga': r.dia }, r.datos));
+    const hoja = XLSX.utils.json_to_sheet(filas);
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hoja, 'TRs');
+
+    const desde = (document.getElementById('histDesde') || {}).value || 'inicio';
+    const hasta = (document.getElementById('histHasta') || {}).value || fechaLocalISO();
+    XLSX.writeFile(libro, `base_datos_TR_${desde}_a_${hasta}.xlsx`);
+}
+
+async function borrarBaseDeDatosTRConfirm() {
+    if (!confirm('¿Borrar todos los registros de TR\'s guardados en la base de datos de este navegador? No afecta al Historial de cargas.')) return;
+    try {
+        await borrarBaseDeDatosTR();
+        mostrarToast('Base de datos de TR\'s borrada.', 'info');
+        renderizarSeccionHistorial();
+    } catch (e) {
+        console.warn('No se pudo borrar la base de datos de TR\'s:', e);
+        mostrarToast('No se pudo borrar la base de datos de TR\'s.', 'danger');
+    }
 }
 
 // --------------------------------------------------------
@@ -1860,7 +2077,7 @@ function cerrarModalObjetivos() { document.getElementById('modalObjetivos').clas
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         parseNumero, escapeHtml, fixMojibake, normalizarNombre,
-        extraerDatosTR, extraerOperariosDB, sumarColumna, extraerNomina,
+        extraerDatosTR, extraerRegistrosTR, extraerOperariosDB, sumarColumna, extraerNomina,
         calcularProductividadPorTurno, combinarPorOperario,
         armarReportePeriodo, fechaLocalISO, lunesDeLaSemana, rangoPreset
     };
