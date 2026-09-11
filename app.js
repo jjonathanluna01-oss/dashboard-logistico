@@ -1955,6 +1955,42 @@ function seccionPDF(doc, titulo, head, body, opts) {
     doc.__y = doc.lastAutoTable.finalY + 8;
 }
 
+// --------------------------------------------------------
+// GRÁFICOS DENTRO DEL PDF
+// Chart.js dibuja en un <canvas> que no hace falta insertar en la
+// página (con "animation:false" el dibujo es sincrónico), así que se
+// puede renderizar "fuera de pantalla", pasarlo a imagen con
+// chart.toBase64Image() y pegarlo en el PDF con doc.addImage(). Paleta
+// clara (fondo blanco) porque el PDF se ve/imprime sobre blanco, a
+// diferencia del dashboard que es oscuro.
+// --------------------------------------------------------
+const PDF_CHART_TEXTO = '#1f2937';
+const PDF_CHART_GRILLA = '#e5e7eb';
+
+function graficoAImagenPDF(config, anchoPx, altoPx) {
+    const canvas = document.createElement('canvas');
+    canvas.width = anchoPx;
+    canvas.height = altoPx;
+    const chart = new Chart(canvas, config);
+    const img = chart.toBase64Image('image/png', 1);
+    chart.destroy();
+    return img;
+}
+
+// Agrega un título + una imagen de gráfico al PDF, respetando saltos de página.
+function graficoPDF(doc, titulo, config, anchoMm, altoMm) {
+    // Un poco más de resolución que la que se ve en el PDF (para que no se
+    // vea pixelado), pero sin pasarse: a escala 4 el PDF pesaba ~3MB por los
+    // 3 gráficos; a escala 2 se ve igual de nítido y pesa una fracción.
+    const escala = 2;
+    const img = graficoAImagenPDF(config, anchoMm * escala, altoMm * escala);
+    if (doc.__y + altoMm + 10 > 280) { doc.addPage(); doc.__y = 15; }
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(20);
+    doc.text(titulo, 14, doc.__y);
+    doc.addImage(img, 'PNG', 14, doc.__y + 3, anchoMm, altoMm, undefined, 'MEDIUM');
+    doc.__y += altoMm + 10;
+}
+
 const ALINEAR_DERECHA = idx => idx.reduce((acc, i) => { acc[i] = { halign: 'right' }; return acc; }, {});
 
 function exportarTablaDB() {
@@ -2022,12 +2058,67 @@ function exportarReportePeriodoPDF() {
         ],
         { columnStyles: ALINEAR_DERECHA([1]) });
 
+    // --- Gráfico: evolución diaria de las 5 tareas ---
+    if (rep.operacionesPorDia.length > 1) {
+        graficoPDF(doc, 'Evolución diaria', {
+            type: 'line',
+            data: {
+                labels: rep.operacionesPorDia.map(d => d.dia.slice(5)), // MM-DD
+                datasets: [
+                    { label: 'Abastecimiento', data: rep.operacionesPorDia.map(d => d.abast), borderColor: ZONA_COLOR_HEX.Abastecimiento, backgroundColor: ZONA_COLOR_HEX.Abastecimiento, tension: 0.3, pointRadius: 3 },
+                    { label: 'Almacenamiento', data: rep.operacionesPorDia.map(d => d.almac), borderColor: ZONA_COLOR_HEX.Almacenamiento, backgroundColor: ZONA_COLOR_HEX.Almacenamiento, tension: 0.3, pointRadius: 3 },
+                    { label: 'Picking', data: rep.operacionesPorDia.map(d => d.pick), borderColor: ZONA_COLOR_HEX.Picking, backgroundColor: ZONA_COLOR_HEX.Picking, tension: 0.3, pointRadius: 3 },
+                    { label: 'Control', data: rep.operacionesPorDia.map(d => d.ctrl), borderColor: ZONA_COLOR_HEX.Control, backgroundColor: ZONA_COLOR_HEX.Control, tension: 0.3, pointRadius: 3 },
+                    { label: 'Despacho', data: rep.operacionesPorDia.map(d => d.desp), borderColor: '#3b82f6', backgroundColor: '#3b82f6', tension: 0.3, pointRadius: 3 },
+                ],
+            },
+            options: {
+                responsive: false, animation: false,
+                plugins: { legend: { position: 'bottom', labels: { color: PDF_CHART_TEXTO, boxWidth: 10, font: { size: 11 } } } },
+                scales: {
+                    x: { ticks: { color: PDF_CHART_TEXTO }, grid: { color: PDF_CHART_GRILLA } },
+                    y: { beginAtZero: true, ticks: { color: PDF_CHART_TEXTO }, grid: { color: PDF_CHART_GRILLA } },
+                },
+            },
+        }, 180, 80);
+    }
+
     seccionPDF(doc, 'Operaciones por día',
         ['Día', 'Abast.', 'Almac.', 'Picking', 'Control', 'Despacho'],
         rep.operacionesPorDia.map(d => [d.dia, fmt(d.abast), fmt(d.almac), fmt(d.pick), fmt(d.ctrl), fmt(d.desp)]),
         { columnStyles: ALINEAR_DERECHA([1, 2, 3, 4, 5]) });
 
     if (rep.operarios.length) {
+        // --- Gráfico: top operarios por eficiencia ---
+        // rep.operarios es por (operario, tarea) -- un mismo operario puede
+        // aparecer más de una vez -- así que el título compara "filas", no
+        // personas, para no decir algo tipo "Top 15 de 12 operarios".
+        const TOP_N = 15;
+        const topOps = rep.operarios.slice(0, TOP_N); // ya viene ordenado desc por eficienciaPct
+        const tituloTop = rep.operarios.length > TOP_N
+            ? `Top ${topOps.length} de ${rep.operarios.length} (operario + tarea) por eficiencia`
+            : `Eficiencia por operario y tarea (${topOps.length})`;
+        graficoPDF(doc, tituloTop, {
+            type: 'bar',
+            data: {
+                labels: topOps.map(o => `${o.nombre} (${o.zona})`),
+                datasets: [{
+                    data: topOps.map(o => Math.round(o.eficienciaPct * 10) / 10),
+                    backgroundColor: topOps.map(o => o.eficienciaPct >= 100 ? '#10b981' : (o.eficienciaPct < 70 ? '#ef4444' : '#f59e0b')),
+                    borderRadius: 3,
+                }],
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: false, animation: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { beginAtZero: true, ticks: { color: PDF_CHART_TEXTO, callback: v => v + '%' }, grid: { color: PDF_CHART_GRILLA } },
+                    y: { ticks: { color: PDF_CHART_TEXTO, font: { size: 9 } }, grid: { display: false } },
+                },
+            },
+        }, 180, Math.min(110, Math.max(50, topOps.length * 7)));
+
         seccionPDF(doc, `Productividad por operario (${rep.operariosUnicos} operario/s)`,
             ['Operario', 'Turno', 'Tarea', 'Total', 'Días', 'Prom./día', 'Efic. %'],
             rep.operarios.map(op => [
@@ -2039,6 +2130,28 @@ function exportarReportePeriodoPDF() {
 
     const turnos = Object.keys(rep.porTurno).sort((a, b) => a.localeCompare(b));
     if (turnos.length) {
+        // --- Gráfico: comparativa por turno ---
+        graficoPDF(doc, 'Comparativa por turno', {
+            type: 'bar',
+            data: {
+                labels: turnos,
+                datasets: ZONAS_COMPARATIVA.map(z => ({
+                    label: z,
+                    data: turnos.map(t => rep.porTurno[t][z]),
+                    backgroundColor: ZONA_COLOR_HEX[z],
+                    borderRadius: 3,
+                })),
+            },
+            options: {
+                responsive: false, animation: false,
+                plugins: { legend: { position: 'bottom', labels: { color: PDF_CHART_TEXTO, boxWidth: 10, font: { size: 11 } } } },
+                scales: {
+                    x: { ticks: { color: PDF_CHART_TEXTO }, grid: { display: false } },
+                    y: { beginAtZero: true, ticks: { color: PDF_CHART_TEXTO }, grid: { color: PDF_CHART_GRILLA } },
+                },
+            },
+        }, 180, 80);
+
         seccionPDF(doc, 'Comparativa por turno (Abast. + Almac. + Picking + Control)',
             ['Turno', ...ZONAS_COMPARATIVA, 'Total'],
             turnos.map(t => {
