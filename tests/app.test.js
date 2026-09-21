@@ -16,6 +16,8 @@ const {
     fechaLocalISO,
     lunesDeLaSemana,
     rangoPreset,
+    resolverCargasPorDia,
+    aplanarProductividadDiaria,
 } = require('../app.js');
 
 test('parseNumero: numeros ya numericos pasan igual', () => {
@@ -334,4 +336,46 @@ test('rangoPreset: "semana" va del lunes a hoy; "7dias" son 7 dias corridos', ()
     assert.deepEqual(rangoPreset('semana', hoy), { desde: '2026-09-07', hasta: '2026-09-10' });
     assert.deepEqual(rangoPreset('7dias', hoy), { desde: '2026-09-04', hasta: '2026-09-10' });
     assert.deepEqual(rangoPreset('semana-pasada', hoy), { desde: '2026-08-31', hasta: '2026-09-06' });
+});
+
+// --- aplanarProductividadDiaria (para Google Sheets) ---
+
+test('aplanarProductividadDiaria: una fila por dia+operario+zona, sin sumar entre dias', () => {
+    const entradas = [
+        entrada('2026-09-07', [{ nombre: 'Juan Perez', total: 800, zona: 'Picking', objetivo: 1000, turno: 'Mañana' }]),
+        entrada('2026-09-08', [{ nombre: 'Juan Perez', total: 1200, zona: 'Picking', objetivo: 1000, turno: 'Mañana' }]),
+    ];
+    const filas = aplanarProductividadDiaria(entradas);
+    assert.equal(filas.length, 2); // NO se suman como en armarReportePeriodo: son 2 dias, 2 filas
+    assert.deepEqual(filas.map(f => f.dia), ['2026-09-07', '2026-09-08']);
+    assert.equal(filas[0].total, 800);
+    assert.equal(filas[1].total, 1200);
+    assert.equal(Math.round(filas[1].eficienciaPct), 120);
+});
+
+test('aplanarProductividadDiaria: respeta el mismo dedupe por dia que armarReportePeriodo (queda la ultima carga)', () => {
+    const entradas = [
+        entrada('2026-09-07', [{ nombre: 'Ana', total: 500, zona: 'Control', objetivo: 1500, turno: 'Tarde' }], { timestamp: '2026-09-07T12:00:00.000Z' }),
+        entrada('2026-09-07', [{ nombre: 'Ana', total: 900, zona: 'Control', objetivo: 1500, turno: 'Tarde' }], { timestamp: '2026-09-07T19:00:00.000Z' }),
+    ];
+    const filas = aplanarProductividadDiaria(entradas);
+    assert.equal(filas.length, 1);
+    assert.equal(filas[0].total, 900);
+});
+
+test('aplanarProductividadDiaria: Despacho no genera filas (igual que en la tabla DB)', () => {
+    const filas = aplanarProductividadDiaria([
+        entrada('2026-09-07', [{ nombre: 'A', total: 100, zona: 'Despacho', objetivo: 1500, turno: 'Mañana' }]),
+    ]);
+    assert.equal(filas.length, 0);
+});
+
+test('resolverCargasPorDia y aplanarProductividadDiaria coinciden con armarReportePeriodo en que dias hay', () => {
+    const entradas = [
+        entrada('2026-09-07', [{ nombre: 'A', total: 100, zona: 'Picking', objetivo: 1000, turno: 'Mañana' }]),
+        entrada('2026-09-08', [{ nombre: 'A', total: 200, zona: 'Picking', objetivo: 1000, turno: 'Mañana' }]),
+    ];
+    const porDia = resolverCargasPorDia(entradas);
+    const rep = armarReportePeriodo(entradas);
+    assert.deepEqual(Object.keys(porDia).sort(), rep.dias);
 });

@@ -3,6 +3,83 @@ const STORAGE_KEY = 'dexterDashboard_v2';
 const HISTORY_KEY = 'dexterDashboard_history_v2';
 const NOMINA_KEY = 'dexterDashboard_nomina_v1';
 const OBJETIVOS_KEY = 'dexterDashboard_objetivos_v1';
+const SHEETS_WEBHOOK_KEY = 'dexterDashboard_sheetsWebhook_v1'; // URL del Apps Script de Google Sheets
+
+// --------------------------------------------------------
+// Script para pegar en Google Sheets (Extensiones → Apps Script).
+// Recibe el POST del dashboard y hace upsert por fecha (Resumen Diario)
+// o por fecha+operario+zona (Productividad): si la fila ya existe la
+// pisa, si no la agrega. Así mandar el mismo período dos veces no
+// duplica filas en la hoja.
+// --------------------------------------------------------
+const SCRIPT_GOOGLE_SHEETS = [
+    'function doPost(e) {',
+    '  try {',
+    '    var data = JSON.parse(e.postData.contents);',
+    '    var ss = SpreadsheetApp.getActiveSpreadsheet();',
+    '    var insertados = 0, actualizados = 0, r;',
+    '',
+    '    if (data.productividad && data.productividad.length) {',
+    '      r = upsertFilas(ss, "Productividad", ["Fecha", "Operario", "Zona", "Turno", "Total", "Meta", "Eficiencia %"],',
+    '        data.productividad.map(function (f) {',
+    '          return {',
+    '            clave: [f.dia, f.nombre, f.zona].join("|"),',
+    '            fila: [f.dia, f.nombre, f.zona, f.turno, f.total, f.objetivo, Math.round(f.eficienciaPct * 10) / 10]',
+    '          };',
+    '        }));',
+    '      insertados += r.insertados; actualizados += r.actualizados;',
+    '    }',
+    '',
+    '    if (data.resumenDiario && data.resumenDiario.length) {',
+    '      r = upsertFilas(ss, "Resumen Diario", ["Fecha", "Abastecimiento", "Almacenamiento", "Picking", "Control", "Despacho"],',
+    '        data.resumenDiario.map(function (d) {',
+    '          return { clave: String(d.dia), fila: [d.dia, d.abast, d.almac, d.pick, d.ctrl, d.desp] };',
+    '        }));',
+    '      insertados += r.insertados; actualizados += r.actualizados;',
+    '    }',
+    '',
+    '    return ContentService.createTextOutput(JSON.stringify({ ok: true, insertados: insertados, actualizados: actualizados }))',
+    '      .setMimeType(ContentService.MimeType.JSON);',
+    '  } catch (err) {',
+    '    return ContentService.createTextOutput(JSON.stringify({ ok: false, error: String(err) }))',
+    '      .setMimeType(ContentService.MimeType.JSON);',
+    '  }',
+    '}',
+    '',
+    '// La "clave" identifica la fila (fecha, o fecha+operario+zona): si ya',
+    '// existe la actualiza en el lugar, si no la agrega al final.',
+    'function upsertFilas(ss, nombreHoja, encabezados, items) {',
+    '  var hoja = ss.getSheetByName(nombreHoja);',
+    '  if (!hoja) {',
+    '    hoja = ss.insertSheet(nombreHoja);',
+    '    hoja.appendRow(encabezados);',
+    '    hoja.setFrozenRows(1);',
+    '  }',
+    '',
+    '  var nFilas = hoja.getLastRow();',
+    '  var indice = {};',
+    '  if (nFilas > 1) {',
+    '    var valores = hoja.getRange(2, 1, nFilas - 1, encabezados.length).getValues();',
+    '    valores.forEach(function (fila, i) {',
+    '      var clave = nombreHoja === "Productividad" ? [fila[0], fila[1], fila[2]].join("|") : String(fila[0]);',
+    '      indice[clave] = i + 2;',
+    '    });',
+    '  }',
+    '',
+    '  var insertados = 0, actualizados = 0;',
+    '  items.forEach(function (item) {',
+    '    if (indice[item.clave]) {',
+    '      hoja.getRange(indice[item.clave], 1, 1, item.fila.length).setValues([item.fila]);',
+    '      actualizados++;',
+    '    } else {',
+    '      hoja.appendRow(item.fila);',
+    '      indice[item.clave] = hoja.getLastRow();',
+    '      insertados++;',
+    '    }',
+    '  });',
+    '  return { insertados: insertados, actualizados: actualizados };',
+    '}',
+].join('\n');
 
 // Si en algún momento tenés un backend propio con API de nómina, poné la URL acá
 // (debe ser https y permitir CORS). Si queda vacío, esta función no hace nada:
@@ -1670,10 +1747,13 @@ async function borrarBaseDeDatosTRConfirm() {
 // operativos, productividad acumulada por operario, comparativa
 // por turno y estados TR del período.
 // --------------------------------------------------------
-function armarReportePeriodo(entradas) {
-    // Una entrada por día calendario. Para operación y detalle de
-    // operarios se prefiere la última carga del día que trajo un
-    // archivo de Flujo Operativo; para TR, la última del día.
+// Une las cargas del historial en una por día calendario (si hubo dos
+// cargas el mismo día se queda con la más nueva; "conOps" es además la
+// última que trajo detalle real de operarios, no una carga "sólo TR"
+// que pisaría el detalle del día con un array vacío). Lo usan tanto
+// armarReportePeriodo como aplanarProductividadDiaria (Google Sheets),
+// para que ambos coincidan siempre en qué carga vale por día.
+function resolverCargasPorDia(entradas) {
     const porDia = {};
     (entradas || []).forEach(e => {
         const dia = diaDeEntrada(e);
@@ -1685,7 +1765,38 @@ function armarReportePeriodo(entradas) {
             porDia[dia].conOps = e;
         }
     });
+    return porDia;
+}
 
+// Una fila por (día, operario, zona): la base para "Productividad por
+// operario" en el reporte semanal y para lo que se manda a Google Sheets.
+function aplanarProductividadDiaria(entradas) {
+    const porDia = resolverCargasPorDia(entradas);
+    const filas = [];
+    Object.keys(porDia).sort().forEach(dia => {
+        const eOps = porDia[dia].conOps || porDia[dia].ultima;
+        if (!Array.isArray(eOps.operariosData)) return;
+        eOps.operariosData.forEach(op => {
+            if (!ZONAS_COMPARATIVA.includes(op.zona)) return; // Despacho no se mide por operario
+            filas.push({
+                dia,
+                nombre: op.nombre,
+                zona: op.zona,
+                turno: op.turno || 'Sin Turno',
+                total: op.total || 0,
+                objetivo: op.objetivo || 0,
+                eficienciaPct: op.objetivo > 0 ? (op.total / op.objetivo) * 100 : 0,
+            });
+        });
+    });
+    return filas;
+}
+
+function armarReportePeriodo(entradas) {
+    // Una entrada por día calendario. Para operación y detalle de
+    // operarios se prefiere la última carga del día que trajo un
+    // archivo de Flujo Operativo; para TR, la última del día.
+    const porDia = resolverCargasPorDia(entradas);
     const dias = Object.keys(porDia).sort();
     const operaciones = { abast: 0, almac: 0, pick: 0, ctrl: 0, desp: 0 };
     const operacionesPorDia = [];
@@ -1762,6 +1873,120 @@ function armarReportePeriodo(entradas) {
         porTurno,
         trPeriodo,
     };
+}
+
+// --------------------------------------------------------
+// ENVIAR A GOOGLE SHEETS
+// No hay backend propio, así que "la base de datos en Sheets" es un
+// Google Apps Script chiquito que el usuario pega UNA vez en su propia
+// hoja (Extensiones → Apps Script → Implementar como app web). Acá
+// sólo se guarda esa URL y se le manda un POST con los datos del
+// período — el script del lado de Sheets hace upsert por fecha, así
+// que mandar el mismo rango dos veces no duplica filas.
+// --------------------------------------------------------
+function obtenerWebhookSheets() {
+    try { return (localStorage.getItem(SHEETS_WEBHOOK_KEY) || '').trim(); } catch (e) { return ''; }
+}
+function guardarWebhookSheets(url) {
+    try { localStorage.setItem(SHEETS_WEBHOOK_KEY, (url || '').trim()); } catch (e) { /* noop */ }
+}
+
+// Content-Type "text/plain" a propósito: si fuera "application/json" el
+// navegador manda un preflight OPTIONS antes del POST, y Apps Script no
+// lo responde (queda como error de CORS). Con text/plain el pedido es
+// "simple" (sin preflight) y Apps Script igual lee el JSON del body.
+async function enviarAGoogleSheets(payload) {
+    const url = obtenerWebhookSheets();
+    if (!url) { const e = new Error('Falta configurar la URL de Google Sheets.'); e.codigo = 'SIN_CONFIGURAR'; throw e; }
+
+    let respuesta;
+    try {
+        respuesta = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify(payload),
+        });
+    } catch (e) {
+        const err = new Error('No se pudo conectar con Google Sheets (revisá tu conexión o la URL configurada).');
+        err.codigo = 'RED';
+        throw err;
+    }
+
+    const texto = await respuesta.text();
+    let datos;
+    try { datos = JSON.parse(texto); }
+    catch (e) {
+        const err = new Error('Google Sheets devolvió una respuesta inesperada (revisá que la URL sea la del Apps Script implementado como app web, con acceso "Cualquier usuario").');
+        err.codigo = 'RESPUESTA_INVALIDA';
+        throw err;
+    }
+    if (!datos.ok) {
+        const err = new Error(datos.error || 'Error desconocido del lado de Google Sheets.');
+        err.codigo = 'SCRIPT';
+        throw err;
+    }
+    return datos;
+}
+
+async function enviarReportePeriodoASheets() {
+    const rep = reportePeriodoActual;
+    if (!rep || !rep.dias.length) { alert('No hay datos en el período seleccionado para enviar.'); return; }
+
+    if (!obtenerWebhookSheets()) { abrirModalConfigSheets(); return; }
+
+    const desde = (document.getElementById('histDesde') || {}).value || '';
+    const hasta = (document.getElementById('histHasta') || {}).value || '';
+    const entradas = filtrarHistorialPorRango(desde, hasta);
+    const productividad = aplanarProductividadDiaria(entradas);
+
+    const btn = document.getElementById('btnEnviarSheets');
+    if (btn) { btn.disabled = true; btn.classList.add('opacity-50'); }
+
+    try {
+        const resultado = await enviarAGoogleSheets({
+            productividad,
+            resumenDiario: rep.operacionesPorDia,
+        });
+        mostrarToast(`Enviado a Google Sheets: ${resultado.insertados || 0} filas nuevas, ${resultado.actualizados || 0} actualizadas.`, 'success');
+    } catch (e) {
+        console.warn('Error enviando a Google Sheets:', e);
+        if (e.codigo === 'SIN_CONFIGURAR') { abrirModalConfigSheets(); }
+        else { mostrarToast(e.message, 'danger'); }
+    } finally {
+        if (btn) { btn.disabled = false; btn.classList.remove('opacity-50'); }
+    }
+}
+
+function abrirModalConfigSheets() {
+    const input = document.getElementById('inputWebhookSheets');
+    if (input) input.value = obtenerWebhookSheets();
+    const modal = document.getElementById('modalConfigSheets');
+    if (modal) modal.classList.remove('hidden');
+}
+function cerrarModalConfigSheets() { document.getElementById('modalConfigSheets').classList.add('hidden'); }
+
+function guardarConfigSheetsDesdeFormulario() {
+    const input = document.getElementById('inputWebhookSheets');
+    const url = input ? input.value.trim() : '';
+    if (url && !/^https:\/\/script\.google\.com\/macros\//.test(url)) {
+        if (!confirm('Esa URL no parece ser de un Apps Script de Google (normalmente empiezan con "https://script.google.com/macros/..."). ¿Guardarla igual?')) return;
+    }
+    guardarWebhookSheets(url);
+    cerrarModalConfigSheets();
+    mostrarToast(url ? 'URL de Google Sheets guardada en este navegador.' : 'URL de Google Sheets borrada.', 'info');
+    if (url) enviarReportePeriodoASheets();
+}
+
+async function copiarScriptSheets() {
+    try {
+        await navigator.clipboard.writeText(SCRIPT_GOOGLE_SHEETS);
+        mostrarToast('Script copiado. Pegalo en Extensiones → Apps Script de tu Google Sheets.', 'success');
+    } catch (e) {
+        // Algunos navegadores bloquean el portapapeles sin gesto directo del
+        // usuario o fuera de https; se ofrece seleccionar el texto a mano.
+        console.warn('No se pudo copiar automáticamente:', e);
+        mostrarToast('No se pudo copiar automático. Abrí la consola del navegador y copiá SCRIPT_GOOGLE_SHEETS, o pedime el código de nuevo.', 'danger');
+    }
 }
 
 function renderizarReportePeriodo(rep) {
@@ -2192,6 +2417,7 @@ if (typeof module !== 'undefined' && module.exports) {
         parseNumero, escapeHtml, fixMojibake, normalizarNombre,
         extraerDatosTR, extraerRegistrosTR, extraerOperariosDB, sumarColumna, extraerNomina,
         calcularProductividadPorTurno, combinarPorOperario,
-        armarReportePeriodo, fechaLocalISO, lunesDeLaSemana, rangoPreset
+        armarReportePeriodo, fechaLocalISO, lunesDeLaSemana, rangoPreset,
+        resolverCargasPorDia, aplanarProductividadDiaria
     };
 }

@@ -425,7 +425,15 @@
             </div>
 
             <div id="histViewReporte" class="hidden">
-                <div class="flex justify-end mb-3">
+                <div class="flex justify-end items-center gap-2 mb-3">
+                    <button onclick="abrirModalConfigSheets()" title="Configurar Google Sheets"
+                        class="bg-dark-800 border border-dark-700 hover:border-gray-500 text-gray-400 hover:text-white p-2 rounded-lg transition-colors">
+                        <i data-lucide="settings" class="w-4 h-4"></i>
+                    </button>
+                    <button id="btnEnviarSheets" onclick="enviarReportePeriodoASheets()"
+                        class="bg-dark-800 border border-dark-700 hover:border-brand-success/50 text-gray-400 hover:text-brand-success text-sm px-4 py-2 rounded-lg flex items-center gap-2 transition-colors font-medium">
+                        <i data-lucide="table-2" class="w-4 h-4"></i> Enviar a Google Sheets
+                    </button>
                     <button onclick="exportarReportePeriodoPDF()"
                         class="bg-brand-accent hover:bg-red-700 text-white text-sm px-4 py-2 rounded-lg flex items-center gap-2 transition-colors font-medium">
                         <i data-lucide="file-text" class="w-4 h-4"></i> Descargar PDF del reporte
@@ -494,6 +502,43 @@
             <button onclick="guardarObjetivosDesdeFormulario()"
                 class="w-full bg-brand-accent hover:bg-red-700 text-white font-bold py-2.5 rounded-lg mt-6 transition-colors">
                 Guardar Metas
+            </button>
+        </div>
+    </div>
+
+    <!-- Modal Configurar Google Sheets -->
+    <div id="modalConfigSheets"
+        class="fixed inset-0 bg-black/80 z-50 hidden flex items-start justify-center p-4 backdrop-blur-sm overflow-y-auto">
+        <div class="glass-panel rounded-2xl p-6 w-full max-w-lg border border-dark-700 shadow-2xl my-8">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-white font-bold text-lg flex items-center gap-2"><i data-lucide="table-2"
+                        class="text-brand-success"></i> Conectar Google Sheets</h3>
+                <button onclick="cerrarModalConfigSheets()" class="text-gray-400 hover:text-white"><i data-lucide="x"
+                        class="w-5 h-5"></i></button>
+            </div>
+            <p class="text-xs text-gray-500 mb-3">Se configura una sola vez. Después, "Enviar a Google Sheets" manda los datos del período elegido directo a tu hoja, sin descargar ni subir nada a mano.</p>
+
+            <ol class="text-xs text-gray-400 space-y-1.5 mb-4 list-decimal list-inside">
+                <li>Abrí (o creá) tu Google Sheets.</li>
+                <li>Menú <b class="text-gray-200">Extensiones → Apps Script</b>.</li>
+                <li>Borrá lo que haya en el editor y pegá el script (lo copiás con el botón de abajo).</li>
+                <li><b class="text-gray-200">Implementar → Nueva implementación</b>. Tipo: <b class="text-gray-200">Aplicación web</b>. Acceso: <b class="text-gray-200">Cualquier usuario</b>.</li>
+                <li>Autorizá los permisos que pida (es tu propia hoja).</li>
+                <li>Copiá la "URL de la aplicación web" y pegala acá abajo.</li>
+            </ol>
+
+            <button onclick="copiarScriptSheets()"
+                class="w-full bg-dark-800 border border-dark-700 hover:border-gray-500 text-gray-300 hover:text-white text-sm py-2 rounded-lg mb-4 transition-colors flex items-center justify-center gap-2">
+                <i data-lucide="clipboard-copy" class="w-4 h-4"></i> Copiar el script para Apps Script
+            </button>
+
+            <label class="block text-xs text-gray-500 mb-1">URL de la aplicación web (Apps Script)</label>
+            <input type="text" id="inputWebhookSheets" placeholder="https://script.google.com/macros/s/..."
+                class="w-full bg-dark-900 border border-dark-700 rounded-lg p-2 text-sm text-white mb-4 focus:outline-none focus:border-brand-accent">
+
+            <button onclick="guardarConfigSheetsDesdeFormulario()"
+                class="w-full bg-brand-success hover:bg-emerald-500 text-white font-bold py-2.5 rounded-lg transition-colors">
+                Guardar y enviar
             </button>
         </div>
     </div>
