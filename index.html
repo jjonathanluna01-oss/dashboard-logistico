@@ -410,6 +410,16 @@
                 </div>
             </div>
 
+            <!-- Fuente de datos: este navegador (local) o Google Sheets (todas las PCs) -->
+            <div class="flex items-center gap-2 mb-4 text-xs">
+                <span class="text-gray-500">Datos de:</span>
+                <button id="btnFuenteLocal" onclick="setFuenteHistorial('local')"
+                    class="text-xs px-2.5 py-1 rounded-lg bg-brand-accent text-white transition-colors">Este navegador</button>
+                <button id="btnFuenteSheets" onclick="setFuenteHistorial('sheets')"
+                    class="text-xs px-2.5 py-1 rounded-lg bg-dark-800 border border-dark-700 hover:border-brand-accent text-gray-300 hover:text-white transition-colors">Google Sheets</button>
+                <span class="text-gray-600">· "Google Sheets" trae lo cargado desde cualquier computadora que ya lo envió</span>
+            </div>
+
             <!-- Sub-pestañas -->
             <div class="flex gap-1 bg-dark-800/80 p-1 rounded-xl border border-dark-700 w-fit mb-4">
                 <button id="btnHistCargas" onclick="switchHistTab('cargas')"

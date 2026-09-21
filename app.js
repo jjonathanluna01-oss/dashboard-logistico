@@ -46,6 +46,52 @@ const SCRIPT_GOOGLE_SHEETS = [
     '  }',
     '}',
     '',
+    '// GET ?desde=YYYY-MM-DD&hasta=YYYY-MM-DD -> lee lo guardado en ese rango,',
+    '// para que el dashboard pueda comparar datos cargados desde otras PCs.',
+    'function doGet(e) {',
+    '  try {',
+    '    var ss = SpreadsheetApp.getActiveSpreadsheet();',
+    '    var params = (e && e.parameter) || {};',
+    '    var desde = params.desde || "0000-01-01";',
+    '    var hasta = params.hasta || "9999-12-31";',
+    '',
+    '    var productividad = leerHoja(ss, "Productividad", desde, hasta).map(function (fila) {',
+    '      return { dia: fila[0], nombre: fila[1], zona: fila[2], turno: fila[3], total: fila[4], objetivo: fila[5], eficienciaPct: fila[6] };',
+    '    });',
+    '    var resumenDiario = leerHoja(ss, "Resumen Diario", desde, hasta).map(function (fila) {',
+    '      return { dia: fila[0], abast: fila[1], almac: fila[2], pick: fila[3], ctrl: fila[4], desp: fila[5] };',
+    '    });',
+    '',
+    '    return ContentService.createTextOutput(JSON.stringify({ ok: true, productividad: productividad, resumenDiario: resumenDiario }))',
+    '      .setMimeType(ContentService.MimeType.JSON);',
+    '  } catch (err) {',
+    '    return ContentService.createTextOutput(JSON.stringify({ ok: false, error: String(err) }))',
+    '      .setMimeType(ContentService.MimeType.JSON);',
+    '  }',
+    '}',
+    '',
+    '// Google Sheets suele convertir un texto tipo "2026-09-21" en fecha real',
+    '// al guardarlo; esto lo vuelve a texto YYYY-MM-DD sea cual sea el tipo',
+    '// que haya quedado en la celda, para que las comparaciones de fecha (acá',
+    '// y en upsertFilas) siempre funcionen igual.',
+    'function formatearFecha(valor) {',
+    '  if (Object.prototype.toString.call(valor) === "[object Date]") {',
+    '    return Utilities.formatDate(valor, Session.getScriptTimeZone(), "yyyy-MM-dd");',
+    '  }',
+    '  return String(valor).slice(0, 10);',
+    '}',
+    '',
+    'function leerHoja(ss, nombreHoja, desde, hasta) {',
+    '  var hoja = ss.getSheetByName(nombreHoja);',
+    '  if (!hoja) return [];',
+    '  var nFilas = hoja.getLastRow();',
+    '  if (nFilas < 2) return [];',
+    '  var valores = hoja.getRange(2, 1, nFilas - 1, hoja.getLastColumn()).getValues();',
+    '  return valores',
+    '    .map(function (fila) { fila[0] = formatearFecha(fila[0]); return fila; })',
+    '    .filter(function (fila) { return fila[0] >= desde && fila[0] <= hasta; });',
+    '}',
+    '',
     '// La "clave" identifica la fila (fecha, o fecha+operario+zona): si ya',
     '// existe la actualiza en el lugar, si no la agrega al final.',
     'function upsertFilas(ss, nombreHoja, encabezados, items) {',
@@ -61,7 +107,8 @@ const SCRIPT_GOOGLE_SHEETS = [
     '  if (nFilas > 1) {',
     '    var valores = hoja.getRange(2, 1, nFilas - 1, encabezados.length).getValues();',
     '    valores.forEach(function (fila, i) {',
-    '      var clave = nombreHoja === "Productividad" ? [fila[0], fila[1], fila[2]].join("|") : String(fila[0]);',
+    '      var claveFecha = formatearFecha(fila[0]);',
+    '      var clave = nombreHoja === "Productividad" ? [claveFecha, fila[1], fila[2]].join("|") : claveFecha;',
     '      indice[clave] = i + 2;',
     '    });',
     '  }',
@@ -1509,7 +1556,9 @@ function guardarConReintento(clave, arr) {
 }
 
 let histTab = 'cargas';
+let fuenteHistorial = 'local'; // 'local' (este navegador) | 'sheets' (Google Sheets)
 let reportePeriodoActual = null; // último reporte calculado, para exportar a PDF
+let tokenHistorial = 0; // evita que una respuesta vieja de Sheets pise una más nueva
 
 function diaDeEntrada(e) {
     return (e && (e.dia || (e.timestamp || '').slice(0, 10))) || '';
@@ -1554,8 +1603,11 @@ function switchHistTab(tab) {
 function setRangoHistorial(preset) {
     let r;
     if (preset === 'todo') {
-        const dias = cargarHistorial().map(diaDeEntrada).filter(Boolean).sort();
-        r = dias.length ? { desde: dias[0], hasta: dias[dias.length - 1] } : rangoPreset('7dias');
+        // En modo "Google Sheets" no tenemos de antemano el rango real de
+        // fechas guardadas sin pedirlo (no vale la pena otro viaje sólo para
+        // eso); se usa un rango bien amplio y listo, igual que rangoPreset.
+        const dias = fuenteHistorial === 'local' ? cargarHistorial().map(diaDeEntrada).filter(Boolean).sort() : [];
+        r = dias.length ? { desde: dias[0], hasta: dias[dias.length - 1] } : rangoPreset('todo');
     } else {
         r = rangoPreset(preset);
     }
@@ -1566,6 +1618,21 @@ function setRangoHistorial(preset) {
     renderizarSeccionHistorial();
 }
 
+function setFuenteHistorial(fuente) {
+    fuenteHistorial = fuente;
+    const act = 'text-xs px-2.5 py-1 rounded-lg bg-brand-accent text-white transition-colors';
+    const inact = 'text-xs px-2.5 py-1 rounded-lg bg-dark-800 border border-dark-700 hover:border-brand-accent text-gray-300 hover:text-white transition-colors';
+    const bLocal = document.getElementById('btnFuenteLocal');
+    const bSheets = document.getElementById('btnFuenteSheets');
+    if (bLocal) bLocal.className = fuente === 'local' ? act : inact;
+    if (bSheets) bSheets.className = fuente === 'sheets' ? act : inact;
+    // Mandar a Sheets lo que se acaba de leer de Sheets es circular; sólo
+    // tiene sentido ese botón cuando la fuente es este navegador.
+    const btnEnviar = document.getElementById('btnEnviarSheets');
+    if (btnEnviar) btnEnviar.classList.toggle('hidden', fuente === 'sheets');
+    renderizarSeccionHistorial();
+}
+
 function filtrarHistorialPorRango(desde, hasta) {
     return cargarHistorial().filter(e => {
         const d = diaDeEntrada(e);
@@ -1573,23 +1640,131 @@ function filtrarHistorialPorRango(desde, hasta) {
     });
 }
 
-function renderizarSeccionHistorial() {
+async function renderizarSeccionHistorial() {
+    const miToken = ++tokenHistorial;
     const desde = (document.getElementById('histDesde') || {}).value || '';
     const hasta = (document.getElementById('histHasta') || {}).value || '';
-    const entradas = filtrarHistorialPorRango(desde, hasta);
-
     const resumenEl = document.getElementById('histRangoResumen');
+    const sufijoFuente = fuenteHistorial === 'sheets' ? ' (Google Sheets)' : '';
+
+    let entradas;
+    if (fuenteHistorial === 'sheets') {
+        if (!obtenerWebhookSheets()) {
+            if (resumenEl) resumenEl.innerText = '· configurá Google Sheets primero';
+            renderizarListaCargas([]);
+            reportePeriodoActual = armarReportePeriodo([]);
+            renderizarReportePeriodo(reportePeriodoActual);
+            abrirModalConfigSheets();
+            return;
+        }
+        if (resumenEl) resumenEl.innerText = '· cargando desde Google Sheets…';
+        try {
+            const datos = await leerDesdeGoogleSheets(desde, hasta);
+            if (miToken !== tokenHistorial) return; // una carga más nueva ya está en curso
+            entradas = reconstruirEntradasDesdeSheets(datos);
+        } catch (e) {
+            if (miToken !== tokenHistorial) return;
+            console.warn('No se pudo leer desde Google Sheets:', e);
+            mostrarToast(e.message || 'No se pudo leer desde Google Sheets.', 'danger');
+            if (resumenEl) resumenEl.innerText = '· error leyendo Google Sheets';
+            renderizarListaCargas([]);
+            reportePeriodoActual = armarReportePeriodo([]);
+            renderizarReportePeriodo(reportePeriodoActual);
+            return;
+        }
+    } else {
+        entradas = filtrarHistorialPorRango(desde, hasta);
+    }
+
     if (resumenEl) {
         const dias = new Set(entradas.map(diaDeEntrada)).size;
         resumenEl.innerText = entradas.length
-            ? `· ${entradas.length} carga${entradas.length === 1 ? '' : 's'} en ${dias} día${dias === 1 ? '' : 's'}`
-            : '· sin cargas en este período';
+            ? `· ${entradas.length} carga${entradas.length === 1 ? '' : 's'} en ${dias} día${dias === 1 ? '' : 's'}${sufijoFuente}`
+            : `· sin datos en este período${sufijoFuente}`;
     }
 
     renderizarListaCargas(entradas);
     reportePeriodoActual = armarReportePeriodo(entradas);
     renderizarReportePeriodo(reportePeriodoActual);
-    renderizarBaseDeDatosTR(desde, hasta);
+    // La base de datos de TR's es siempre local: Sheets no guarda ese detalle.
+    if (fuenteHistorial === 'local') renderizarBaseDeDatosTR(desde, hasta);
+}
+
+// --------------------------------------------------------
+// LEER DE GOOGLE SHEETS (la mitad "lectura" del mismo Apps Script
+// que ya recibe los envíos por POST) y reconstruir "entradas" con la
+// misma forma que el historial local, para reusar armarReportePeriodo
+// y toda la UI de reporte/PDF sin duplicar esa lógica.
+// --------------------------------------------------------
+async function leerDesdeGoogleSheets(desde, hasta) {
+    const url = obtenerWebhookSheets();
+    if (!url) { const e = new Error('Falta configurar la URL de Google Sheets.'); e.codigo = 'SIN_CONFIGURAR'; throw e; }
+
+    const params = new URLSearchParams({ desde: desde || '', hasta: hasta || '' });
+    const urlConParams = url + (url.includes('?') ? '&' : '?') + params.toString();
+
+    let respuesta;
+    try {
+        respuesta = await fetch(urlConParams);
+    } catch (e) {
+        const err = new Error('No se pudo conectar con Google Sheets para leer los datos (revisá la URL configurada y que el script tenga la función doGet — puede que necesites actualizarlo).');
+        err.codigo = 'RED';
+        throw err;
+    }
+
+    const texto = await respuesta.text();
+    let datos;
+    try { datos = JSON.parse(texto); }
+    catch (e) {
+        const err = new Error('Google Sheets devolvió una respuesta que no se pudo leer al intentar traer los datos.');
+        err.codigo = 'RESPUESTA_INVALIDA';
+        throw err;
+    }
+    if (!datos.ok) {
+        const err = new Error(datos.error || 'Error desconocido leyendo Google Sheets.');
+        err.codigo = 'SCRIPT';
+        throw err;
+    }
+    return datos; // { ok, productividad: [...], resumenDiario: [...] }
+}
+
+// Convierte { productividad, resumenDiario } (formato Sheets, una fila por
+// dia+operario+zona / dia) en un array de "entradas" con la misma forma
+// que usa el historial local, agrupando por día.
+function reconstruirEntradasDesdeSheets(datosSheets) {
+    const porDia = {};
+    const asegurarDia = (dia) => {
+        if (!porDia[dia]) {
+            porDia[dia] = {
+                dia, timestamp: dia + 'T12:00:00.000Z', fecha: 'Google Sheets: ' + dia,
+                opsActualizado: true, abast: 0, almac: 0, pick: 0, ctrl: 0, desp: 0,
+                despachoEsOrdenesTR: false, operariosData: [], trData: {},
+            };
+        }
+        return porDia[dia];
+    };
+
+    (datosSheets.productividad || []).forEach(f => {
+        const dia = String(f.dia || '').slice(0, 10);
+        if (!dia) return;
+        asegurarDia(dia).operariosData.push({
+            nombre: f.nombre, zona: f.zona, turno: f.turno,
+            total: Number(f.total) || 0, objetivo: Number(f.objetivo) || 0,
+        });
+    });
+
+    (datosSheets.resumenDiario || []).forEach(d => {
+        const dia = String(d.dia || '').slice(0, 10);
+        if (!dia) return;
+        const entrada = asegurarDia(dia);
+        entrada.abast = Number(d.abast) || 0;
+        entrada.almac = Number(d.almac) || 0;
+        entrada.pick = Number(d.pick) || 0;
+        entrada.ctrl = Number(d.ctrl) || 0;
+        entrada.desp = Number(d.desp) || 0;
+    });
+
+    return Object.keys(porDia).sort().map(dia => porDia[dia]);
 }
 
 function renderizarListaCargas(entradas) {
@@ -2433,6 +2608,6 @@ if (typeof module !== 'undefined' && module.exports) {
         extraerDatosTR, extraerRegistrosTR, extraerOperariosDB, sumarColumna, extraerNomina,
         calcularProductividadPorTurno, combinarPorOperario,
         armarReportePeriodo, fechaLocalISO, lunesDeLaSemana, rangoPreset,
-        resolverCargasPorDia, aplanarProductividadDiaria
+        resolverCargasPorDia, aplanarProductividadDiaria, reconstruirEntradasDesdeSheets
     };
 }

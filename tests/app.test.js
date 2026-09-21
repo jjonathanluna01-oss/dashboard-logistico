@@ -18,6 +18,7 @@ const {
     rangoPreset,
     resolverCargasPorDia,
     aplanarProductividadDiaria,
+    reconstruirEntradasDesdeSheets,
 } = require('../app.js');
 
 test('parseNumero: numeros ya numericos pasan igual', () => {
@@ -378,4 +379,48 @@ test('resolverCargasPorDia y aplanarProductividadDiaria coinciden con armarRepor
     const porDia = resolverCargasPorDia(entradas);
     const rep = armarReportePeriodo(entradas);
     assert.deepEqual(Object.keys(porDia).sort(), rep.dias);
+});
+
+// --- reconstruirEntradasDesdeSheets (leer Google Sheets hacia el reporte) ---
+
+test('reconstruirEntradasDesdeSheets: arma una entrada por dia con operariosData y los 5 totales', () => {
+    const datosSheets = {
+        productividad: [
+            { dia: '2026-09-07', nombre: 'Juan Perez', zona: 'Picking', turno: 'Mañana', total: 900, objetivo: 1000, eficienciaPct: 90 },
+            { dia: '2026-09-07', nombre: 'Brenda Centurion', zona: 'Control', turno: 'Tarde', total: 500, objetivo: 1500, eficienciaPct: 33.3 },
+            { dia: '2026-09-08', nombre: 'Juan Perez', zona: 'Picking', turno: 'Mañana', total: 950, objetivo: 1000, eficienciaPct: 95 },
+        ],
+        resumenDiario: [
+            { dia: '2026-09-07', abast: 100, almac: 200, pick: 900, ctrl: 500, desp: 10 },
+            { dia: '2026-09-08', abast: 110, almac: 210, pick: 950, ctrl: 0, desp: 12 },
+        ],
+    };
+    const entradas = reconstruirEntradasDesdeSheets(datosSheets);
+    assert.equal(entradas.length, 2);
+    assert.deepEqual(entradas.map(e => e.dia), ['2026-09-07', '2026-09-08']);
+
+    const dia7 = entradas[0];
+    assert.equal(dia7.operariosData.length, 2);
+    assert.equal(dia7.pick, 900);
+    assert.equal(dia7.opsActualizado, true);
+
+    // Se puede alimentar directo a armarReportePeriodo, igual que el historial local.
+    const rep = armarReportePeriodo(entradas);
+    assert.equal(rep.operaciones.pick, 1850); // 900 + 950
+    assert.equal(rep.operarios.find(o => o.nombre === 'Juan Perez').total, 1850);
+});
+
+test('reconstruirEntradasDesdeSheets: funciona si solo viene uno de los dos (productividad o resumenDiario)', () => {
+    const soloResumen = reconstruirEntradasDesdeSheets({ resumenDiario: [{ dia: '2026-09-07', abast: 5, almac: 0, pick: 0, ctrl: 0, desp: 0 }] });
+    assert.equal(soloResumen.length, 1);
+    assert.deepEqual(soloResumen[0].operariosData, []);
+
+    const soloProductividad = reconstruirEntradasDesdeSheets({ productividad: [{ dia: '2026-09-07', nombre: 'Ana', zona: 'Control', turno: 'Mañana', total: 50, objetivo: 1500, eficienciaPct: 3.3 }] });
+    assert.equal(soloProductividad.length, 1);
+    assert.equal(soloProductividad[0].abast, 0);
+});
+
+test('reconstruirEntradasDesdeSheets: entradas vacias o indefinidas no rompen', () => {
+    assert.deepEqual(reconstruirEntradasDesdeSheets({}), []);
+    assert.deepEqual(reconstruirEntradasDesdeSheets({ productividad: [], resumenDiario: [] }), []);
 });
