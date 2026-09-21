@@ -18,7 +18,11 @@ const {
     rangoPreset,
     resolverCargasPorDia,
     aplanarProductividadDiaria,
-    reconstruirEntradasDesdeSheets,
+    normalizarFechaCelda,
+    encontrarColumnaFecha,
+    agruparFilasPorDia,
+    construirEntradaDesdeFilas,
+    construirEntradasPorDia,
 } = require('../app.js');
 
 test('parseNumero: numeros ya numericos pasan igual', () => {
@@ -381,46 +385,86 @@ test('resolverCargasPorDia y aplanarProductividadDiaria coinciden con armarRepor
     assert.deepEqual(Object.keys(porDia).sort(), rep.dias);
 });
 
-// --- reconstruirEntradasDesdeSheets (leer Google Sheets hacia el reporte) ---
+// --- normalizarFechaCelda / agruparFilasPorDia / construirEntradas*
+//     (Google Sheets como fuente: el usuario pega los reportes crudos) ---
 
-test('reconstruirEntradasDesdeSheets: arma una entrada por dia con operariosData y los 5 totales', () => {
-    const datosSheets = {
-        productividad: [
-            { dia: '2026-09-07', nombre: 'Juan Perez', zona: 'Picking', turno: 'Mañana', total: 900, objetivo: 1000, eficienciaPct: 90 },
-            { dia: '2026-09-07', nombre: 'Brenda Centurion', zona: 'Control', turno: 'Tarde', total: 500, objetivo: 1500, eficienciaPct: 33.3 },
-            { dia: '2026-09-08', nombre: 'Juan Perez', zona: 'Picking', turno: 'Mañana', total: 950, objetivo: 1000, eficienciaPct: 95 },
-        ],
-        resumenDiario: [
-            { dia: '2026-09-07', abast: 100, almac: 200, pick: 900, ctrl: 500, desp: 10 },
-            { dia: '2026-09-08', abast: 110, almac: 210, pick: 950, ctrl: 0, desp: 12 },
-        ],
-    };
-    const entradas = reconstruirEntradasDesdeSheets(datosSheets);
+test('normalizarFechaCelda: entiende YYYY-MM-DD, DD/MM/YYYY, Date y serial de Excel', () => {
+    assert.equal(normalizarFechaCelda('2026-09-21'), '2026-09-21');
+    assert.equal(normalizarFechaCelda('21/09/2026'), '2026-09-21');
+    assert.equal(normalizarFechaCelda('21-09-2026'), '2026-09-21');
+    assert.equal(normalizarFechaCelda(new Date(2026, 8, 21)), '2026-09-21');
+    assert.equal(normalizarFechaCelda(46286), '2026-09-21'); // serial de Excel/Sheets
+    assert.equal(normalizarFechaCelda(''), '');
+    assert.equal(normalizarFechaCelda(null), '');
+    assert.equal(normalizarFechaCelda('texto sin fecha'), '');
+});
+
+test('encontrarColumnaFecha: encuentra Día/Dia/Fecha sin importar mayusculas o mojibake', () => {
+    assert.equal(encontrarColumnaFecha([{ Nombre: 'a', 'DÃ­a': '2026-09-21' }]), 'DÃ­a');
+    assert.equal(encontrarColumnaFecha([{ Nombre: 'a', fecha: '2026-09-21' }]), 'fecha');
+    assert.equal(encontrarColumnaFecha([{ Nombre: 'a', Otra: 'b' }]), null);
+    assert.equal(encontrarColumnaFecha([]), null);
+});
+
+test('agruparFilasPorDia: separa filas por dia e ignora las que no tienen fecha reconocible', () => {
+    const filas = [
+        { Nombre: 'Juan', Día: '2026-09-07' },
+        { Nombre: 'Ana', Día: '21/09/2026' },
+        { Nombre: 'Sin fecha', Día: '' },
+    ];
+    const grupos = agruparFilasPorDia(filas);
+    assert.deepEqual(Object.keys(grupos).sort(), ['2026-09-07', '2026-09-21']);
+    assert.equal(grupos['2026-09-07'].length, 1);
+    assert.equal(grupos['2026-09-21'][0].Nombre, 'Ana');
+});
+
+test('construirEntradaDesdeFilas: arma una entrada reutilizando extraerOperariosDB/extraerRegistrosTR', () => {
+    // Como en una hoja real: todas las filas comparten las mismas columnas
+    // (sumarColumna/extraerOperariosDB sólo miran las columnas de la primera
+    // fila para encontrar "Cantidad pickeada", etc.).
+    const filasProd = [
+        { 'Nombre y apellido': 'Juan Perez', 'Cantidad pickeada': 900, 'Cantidad controlada': 0 },
+        { 'Nombre y apellido': 'Brenda Centurion', 'Cantidad pickeada': 0, 'Cantidad controlada': 500 },
+    ];
+    const filasTR = [
+        { Estado: 'DISPATCHED', 'Cantidad Solicitada': 50 },
+        { Estado: 'CREATED', 'Cantidad Solicitada': 5 },
+    ];
+    const entrada = construirEntradaDesdeFilas('2026-09-07', filasProd, filasTR);
+    assert.equal(entrada.dia, '2026-09-07');
+    assert.equal(entrada.pick, 900);
+    assert.equal(entrada.ctrl, 500);
+    assert.equal(entrada.operariosData.length, 2);
+    assert.deepEqual(entrada.trData, { DISPATCHED: 50, CREATED: 5 });
+    assert.equal(entrada.opsActualizado, true);
+    assert.equal(entrada.despachoEsOrdenesTR, false); // hubo filas de productividad
+});
+
+test('construirEntradaDesdeFilas: sin filas de productividad, Despacho sale de DISPATCHED (como con un archivo TR solo)', () => {
+    const entrada = construirEntradaDesdeFilas('2026-09-07', [], [{ Estado: 'DISPATCHED', 'Cantidad Solicitada': 40 }]);
+    assert.equal(entrada.desp, 40);
+    assert.equal(entrada.despachoEsOrdenesTR, true);
+    assert.equal(entrada.opsActualizado, false);
+});
+
+test('construirEntradasPorDia: une productividad y TR agrupados por dia, y alimenta armarReportePeriodo', () => {
+    const filasProd = [
+        { 'Nombre y apellido': 'Juan Perez', 'Cantidad pickeada': 900, Día: '2026-09-07' },
+        { 'Nombre y apellido': 'Juan Perez', 'Cantidad pickeada': 950, Día: '2026-09-08' },
+    ];
+    const filasTR = [
+        { Estado: 'DISPATCHED', 'Cantidad Solicitada': 10, Día: '2026-09-07' },
+    ];
+    const entradas = construirEntradasPorDia(filasProd, filasTR);
     assert.equal(entradas.length, 2);
     assert.deepEqual(entradas.map(e => e.dia), ['2026-09-07', '2026-09-08']);
 
-    const dia7 = entradas[0];
-    assert.equal(dia7.operariosData.length, 2);
-    assert.equal(dia7.pick, 900);
-    assert.equal(dia7.opsActualizado, true);
-
-    // Se puede alimentar directo a armarReportePeriodo, igual que el historial local.
     const rep = armarReportePeriodo(entradas);
-    assert.equal(rep.operaciones.pick, 1850); // 900 + 950
-    assert.equal(rep.operarios.find(o => o.nombre === 'Juan Perez').total, 1850);
+    assert.equal(rep.operaciones.pick, 1850); // 900 + 950, como si viniera del historial local
+    assert.equal(rep.trPeriodo.DISPATCHED, 10);
 });
 
-test('reconstruirEntradasDesdeSheets: funciona si solo viene uno de los dos (productividad o resumenDiario)', () => {
-    const soloResumen = reconstruirEntradasDesdeSheets({ resumenDiario: [{ dia: '2026-09-07', abast: 5, almac: 0, pick: 0, ctrl: 0, desp: 0 }] });
-    assert.equal(soloResumen.length, 1);
-    assert.deepEqual(soloResumen[0].operariosData, []);
-
-    const soloProductividad = reconstruirEntradasDesdeSheets({ productividad: [{ dia: '2026-09-07', nombre: 'Ana', zona: 'Control', turno: 'Mañana', total: 50, objetivo: 1500, eficienciaPct: 3.3 }] });
-    assert.equal(soloProductividad.length, 1);
-    assert.equal(soloProductividad[0].abast, 0);
-});
-
-test('reconstruirEntradasDesdeSheets: entradas vacias o indefinidas no rompen', () => {
-    assert.deepEqual(reconstruirEntradasDesdeSheets({}), []);
-    assert.deepEqual(reconstruirEntradasDesdeSheets({ productividad: [], resumenDiario: [] }), []);
+test('construirEntradasPorDia: sin filas con fecha reconocible da un array vacio', () => {
+    assert.deepEqual(construirEntradasPorDia([], []), []);
+    assert.deepEqual(construirEntradasPorDia([{ Nombre: 'a' }], []), []);
 });
