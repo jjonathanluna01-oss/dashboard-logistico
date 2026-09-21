@@ -1899,24 +1899,35 @@ async function enviarAGoogleSheets(payload) {
     const url = obtenerWebhookSheets();
     if (!url) { const e = new Error('Falta configurar la URL de Google Sheets.'); e.codigo = 'SIN_CONFIGURAR'; throw e; }
 
+    const cuerpo = JSON.stringify(payload);
+    const headers = { 'Content-Type': 'text/plain;charset=utf-8' };
+
+    // 1er intento en modo normal ("cors"): si el Apps Script está bien
+    // desplegado (acceso "Cualquier usuario"), esto deja leer la respuesta
+    // real del script (cuántas filas insertó/actualizó).
     let respuesta;
     try {
-        respuesta = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify(payload),
-        });
+        respuesta = await fetch(url, { method: 'POST', headers, body: cuerpo });
     } catch (e) {
-        const err = new Error('No se pudo conectar con Google Sheets (revisá tu conexión o la URL configurada).');
-        err.codigo = 'RED';
-        throw err;
+        // El navegador bloqueó la respuesta antes de que la pudiéramos leer
+        // -- es el bloqueo de CORS típico de los Apps Script. Se reintenta
+        // en modo "no-cors": el POST sale igual y Apps Script sí lo recibe
+        // y guarda, pero ya no hay forma de leer la confirmación acá.
+        try {
+            await fetch(url, { method: 'POST', mode: 'no-cors', headers, body: cuerpo });
+            return { ok: true, sinConfirmar: true };
+        } catch (e2) {
+            const err = new Error('No se pudo conectar con Google Sheets. Revisá que la URL sea la de la implementación como app web (termina en /exec) y que el acceso esté en "Cualquier usuario".');
+            err.codigo = 'RED';
+            throw err;
+        }
     }
 
     const texto = await respuesta.text();
     let datos;
     try { datos = JSON.parse(texto); }
     catch (e) {
-        const err = new Error('Google Sheets devolvió una respuesta inesperada (revisá que la URL sea la del Apps Script implementado como app web, con acceso "Cualquier usuario").');
+        const err = new Error('Google Sheets devolvió una respuesta que no se pudo leer (revisá que la URL sea la del Apps Script implementado como app web, con acceso "Cualquier usuario", no "Solo yo").');
         err.codigo = 'RESPUESTA_INVALIDA';
         throw err;
     }
@@ -1947,7 +1958,11 @@ async function enviarReportePeriodoASheets() {
             productividad,
             resumenDiario: rep.operacionesPorDia,
         });
-        mostrarToast(`Enviado a Google Sheets: ${resultado.insertados || 0} filas nuevas, ${resultado.actualizados || 0} actualizadas.`, 'success');
+        if (resultado.sinConfirmar) {
+            mostrarToast('Se mandaron los datos a Google Sheets, pero el navegador no dejó leer la confirmación (es normal con Apps Script). Revisá tu hoja para confirmar que llegaron.', 'info');
+        } else {
+            mostrarToast(`Enviado a Google Sheets: ${resultado.insertados || 0} filas nuevas, ${resultado.actualizados || 0} actualizadas.`, 'success');
+        }
     } catch (e) {
         console.warn('Error enviando a Google Sheets:', e);
         if (e.codigo === 'SIN_CONFIGURAR') { abrirModalConfigSheets(); }
