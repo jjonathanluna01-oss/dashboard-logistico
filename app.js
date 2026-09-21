@@ -1700,12 +1700,17 @@ async function leerDesdeGoogleSheets(desde, hasta) {
     const url = obtenerWebhookSheets();
     if (!url) { const e = new Error('Falta configurar la URL de Google Sheets.'); e.codigo = 'SIN_CONFIGURAR'; throw e; }
 
-    const params = new URLSearchParams({ desde: desde || '', hasta: hasta || '' });
+    // "_t" es sólo para que la URL sea distinta cada vez: Google mete la
+    // respuesta de doGet en caché agresivamente (se vieron respuestas de
+    // hace varios minutos, con datos viejos, incluso con cache:'no-store'
+    // en el fetch -- eso sólo le pide al navegador que no cachee, pero el
+    // lado de Google igual puede servir una copia guardada para la misma URL).
+    const params = new URLSearchParams({ desde: desde || '', hasta: hasta || '', _t: String(Date.now()) });
     const urlConParams = url + (url.includes('?') ? '&' : '?') + params.toString();
 
     let respuesta;
     try {
-        respuesta = await fetch(urlConParams);
+        respuesta = await fetch(urlConParams, { cache: 'no-store' });
     } catch (e) {
         const err = new Error('No se pudo conectar con Google Sheets para leer los datos (revisá la URL configurada y que el script tenga la función doGet — puede que necesites actualizarlo).');
         err.codigo = 'RED';
