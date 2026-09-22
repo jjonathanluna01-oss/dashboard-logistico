@@ -10,8 +10,10 @@ const SHEETS_WEBHOOK_KEY = 'dexterDashboard_sheetsWebhook_v1'; // URL del Apps S
 // Google Sheets es la fuente: el usuario pega ahí (a mano, copiando el
 // reporte que baja de su sistema de trabajo) las hojas "Productividad"
 // y "Estado de TR", una fila por registro, con todos los días juntos
-// (necesita una columna de fecha para poder separar un día del otro).
-// Este script sólo LEE esas dos hojas tal cual están y se las manda al
+// (necesita una columna de fecha para poder separar un día del otro);
+// y la hoja "Nómina", con una fila por operario (columnas Nombre y
+// Turno) -- ésa no lleva fecha, siempre se usa la última versión.
+// Este script sólo LEE esas hojas tal cual están y se las manda al
 // dashboard como JSON -- no escribe nada en la planilla.
 // --------------------------------------------------------
 const SCRIPT_GOOGLE_SHEETS = [
@@ -22,6 +24,7 @@ const SCRIPT_GOOGLE_SHEETS = [
     '      ok: true,',
     '      productividad: leerHojaComoObjetos(ss, "Productividad"),',
     '      estadoTR: leerHojaComoObjetos(ss, "Estado de TR"),',
+    '      nomina: leerHojaComoObjetos(ss, "Nómina"),',
     '    })).setMimeType(ContentService.MimeType.JSON);',
     '  } catch (err) {',
     '    return ContentService.createTextOutput(JSON.stringify({ ok: false, error: String(err) }))',
@@ -65,11 +68,6 @@ const SCRIPT_GOOGLE_SHEETS = [
     '  return valor;',
     '}',
 ].join('\n');
-
-// Si en algún momento tenés un backend propio con API de nómina, poné la URL acá
-// (debe ser https y permitir CORS). Si queda vacío, esta función no hace nada:
-// no hay llamadas fallidas ni errores en consola.
-const BACKEND_URL = '';
 
 const DOUGHNUT_COLORS = ['#e52329', '#f59e0b', '#27272a', '#52525b', '#10b981', '#3f3f46'];
 
@@ -358,27 +356,14 @@ function borrarBaseDeDatosTR() {
 
 // --------------------------------------------------------
 // NÓMINA / TURNOS
-// Sin backend, la nómina se guarda localmente en el navegador:
-// se sube una vez (Excel/CSV con columnas Nombre y Turno) desde
-// el modal "Actualizar Datos" y queda persistida.
+// Viene de la hoja "Nómina" de Google Sheets (columnas Nombre y Turno),
+// igual que Productividad y Estado de TR -- se trae junto con ellas en
+// sincronizarDesdeGoogleSheets. Acá sólo se carga la última copia
+// guardada en este navegador, para tener algo mientras llega el primer
+// "Actualizar ahora" de la sesión.
 // --------------------------------------------------------
-async function cargarNominaDesdeBD() {
-    if (!BACKEND_URL) {
-        nominaGlobal = cargarNominaLocal();
-        return;
-    }
-    try {
-        const respuesta = await fetch(BACKEND_URL);
-        if (respuesta.ok) {
-            nominaGlobal = await respuesta.json();
-            guardarNominaLocal(nominaGlobal);
-        } else {
-            nominaGlobal = cargarNominaLocal();
-        }
-    } catch (error) {
-        console.warn('No se pudo conectar con el backend de nómina, uso la copia local.', error);
-        nominaGlobal = cargarNominaLocal();
-    }
+function cargarNominaInicial() {
+    nominaGlobal = cargarNominaLocal();
 }
 function guardarNominaLocal(nomina) {
     try { localStorage.setItem(NOMINA_KEY, JSON.stringify(nomina)); }
@@ -402,6 +387,19 @@ function extraerNomina(datos) {
             turno: keyTurno ? fixMojibake(String(f[keyTurno] || '')).trim() : 'Sin Turno'
         }))
         .filter(n => n.nombre);
+}
+
+// Se llama con las filas crudas de la hoja "Nómina" cada vez que se lee
+// Google Sheets (sync principal o sólo "Actualizar días"), para que el
+// cruce nombre→turno use siempre la última versión de la hoja. Debe
+// llamarse ANTES de construirEntradasPorDia/extraerOperariosDB, que son
+// quienes leen nominaGlobal para asignar el turno de cada operario.
+function aplicarNominaDesdeSheets(filasNomina) {
+    const nomina = extraerNomina(filasNomina);
+    if (nomina.length) {
+        nominaGlobal = nomina;
+        guardarNominaLocal(nominaGlobal);
+    }
 }
 
 // --------------------------------------------------------
@@ -459,7 +457,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     ConfigurarGraficosBase();
     llenarFormularioObjetivos();
 
-    await cargarNominaDesdeBD();
+    cargarNominaInicial();
 
     const guardado = cargarEstadoGuardado();
     if (guardado) {
@@ -735,28 +733,6 @@ function renderizarLeyendaDoughnut(labels, values, colors, total) {
 function abrirModalUpdate() { document.getElementById('modalUpdate').classList.remove('hidden'); }
 function cerrarModalUpdate() { document.getElementById('modalUpdate').classList.add('hidden'); }
 
-// La nómina/turnos sigue siendo un archivo aparte (no es un reporte del
-// día a día, se sube una sola vez y listo) -- lo demás ahora viene de
-// Google Sheets, ver sincronizarDesdeGoogleSheets más abajo.
-async function procesarNomina() {
-    const fileNomina = document.getElementById('fileNomina') ? document.getElementById('fileNomina').files[0] : null;
-    if (!fileNomina) { alert('Elegí un archivo de nómina primero.'); return; }
-    try {
-        const dataNomina = await leerExcel(fileNomina);
-        const nomina = extraerNomina(dataNomina);
-        if (nomina.length) {
-            nominaGlobal = nomina;
-            guardarNominaLocal(nominaGlobal);
-            mostrarToast(`Nómina actualizada: ${nomina.length} operario(s).`, 'success');
-        } else {
-            mostrarToast('No se encontraron columnas de Nombre/Turno reconocibles en ese archivo.', 'danger');
-        }
-    } catch (e) {
-        console.error(e);
-        alert('Error procesando el archivo de nómina.');
-    }
-}
-
 function mostrarAvisoColumnas(faltantes) {
     const el = document.getElementById('avisoColumnas');
     if (!el) return;
@@ -768,22 +744,6 @@ function mostrarAvisoColumnas(faltantes) {
     el.classList.remove('hidden');
     el.innerHTML = `<b>No se encontraron algunas columnas esperadas</b> (esas métricas pueden estar en 0 o desactualizadas):<br>` +
         faltantes.map(f => `• ${f}`).join('<br>');
-}
-
-function leerExcel(file) {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            try {
-                const data = new Uint8Array(e.target.result);
-                const workbook = XLSX.read(data, { type: 'array', cellDates: true });
-                const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-                resolve(XLSX.utils.sheet_to_json(firstSheet, { defval: 0 }));
-            } catch (err) { reject(err); }
-        };
-        reader.onerror = () => reject(new Error('No se pudo leer el archivo.'));
-        reader.readAsArrayBuffer(file);
-    });
 }
 
 function sumarColumna(datos, alias) {
@@ -900,7 +860,7 @@ function extraerOperariosDB(datos) {
         const objetivo = OBJETIVOS_ZONA[zona] || 1500;
         const eficienciaPct = (total / objetivo) * 100;
 
-        // Cruce con la nómina cargada (local o backend, ver cargarNominaDesdeBD)
+        // Cruce con la nómina cargada desde la hoja "Nómina" de Google Sheets
         const operarioEnNomina = nominaGlobal.find(n => n.nombre && normalizarNombre(n.nombre) === claveNombre);
         const turnoAsignado = operarioEnNomina ? operarioEnNomina.turno : 'Sin Turno';
 
@@ -1536,6 +1496,7 @@ async function renderizarSeccionHistorial(forzarRefrescoSheets) {
             try {
                 const datos = await leerFilasCrudasDeSheets();
                 if (miToken !== tokenHistorial) return; // una carga más nueva ya está en curso
+                aplicarNominaDesdeSheets(datos.nomina);
                 entradasSheetsCache = construirEntradasPorDia(datos.productividad || [], datos.estadoTR || []);
             } catch (e) {
                 if (miToken !== tokenHistorial) return;
@@ -1583,11 +1544,13 @@ async function renderizarSeccionHistorial(forzarRefrescoSheets) {
 // GOOGLE SHEETS COMO FUENTE
 // El usuario pega en su Sheets, tal cual bajan de su sistema de trabajo,
 // los reportes de "Productividad" y "Estado de TR" -- con todos los días
-// acumulados uno abajo del otro y una columna de fecha. El Apps Script
-// (doGet) sólo devuelve esas dos hojas completas como arrays de objetos
-// {columna: valor}; acá se agrupan por día y cada grupo de filas pasa
-// por las MISMAS funciones que ya procesaban un archivo subido
-// (extraerOperariosDB / extraerRegistrosTR), para no duplicar lógica.
+// acumulados uno abajo del otro y una columna de fecha -- y mantiene la
+// hoja "Nómina" (Nombre/Turno, sin fecha, siempre la última versión). El
+// Apps Script (doGet) devuelve esas tres hojas completas como arrays de
+// objetos {columna: valor}; acá se agrupan por día y cada grupo de filas
+// pasa por las MISMAS funciones que ya procesaban un archivo subido
+// (extraerOperariosDB / extraerRegistrosTR / extraerNomina), para no
+// duplicar lógica.
 // --------------------------------------------------------
 const ALIASES_COLUMNA_FECHA = ['día', 'dia', 'fecha'];
 
@@ -1723,13 +1686,13 @@ async function leerFilasCrudasDeSheets() {
         err.codigo = 'SCRIPT';
         throw err;
     }
-    return datos; // { ok, productividad: [...], estadoTR: [...] }
+    return datos; // { ok, productividad: [...], estadoTR: [...], nomina: [...] }
 }
 
 // Acción principal del botón "Actualizar ahora": trae TODO lo que haya en
-// Sheets, guarda cada día en el historial local (para las comparativas de
-// período) y muestra el día más reciente en el dashboard/DB, como si se
-// hubiera subido ese archivo.
+// Sheets (Productividad, Estado de TR y Nómina), guarda cada día en el
+// historial local (para las comparativas de período) y muestra el día
+// más reciente en el dashboard/DB, como si se hubiera subido ese archivo.
 async function sincronizarDesdeGoogleSheets() {
     if (!obtenerWebhookSheets()) { abrirModalConfigSheets(); return; }
 
@@ -1742,6 +1705,7 @@ async function sincronizarDesdeGoogleSheets() {
 
     try {
         const datos = await leerFilasCrudasDeSheets();
+        aplicarNominaDesdeSheets(datos.nomina); // antes de construir las entradas: usan nominaGlobal para asignar turno
         const entradas = construirEntradasPorDia(datos.productividad || [], datos.estadoTR || []);
 
         if (!entradas.length) {

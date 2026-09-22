@@ -356,7 +356,8 @@
             <p class="text-xs text-gray-500 mb-4">
                 Pegá los reportes que bajás de tu sistema de trabajo en tu Google Sheets, cada uno en su
                 hoja ("Productividad" y "Estado de TR"), con todos los días acumulados uno abajo del otro
-                y una columna de fecha. Acá se muestra el día más reciente; para el reporte de período se
+                y una columna de fecha; y mantené la hoja "Nómina" (columnas Nombre y Turno) con tu
+                plantilla de operarios. Acá se muestra el día más reciente; para el reporte de período se
                 usan todos los días que haya.
             </p>
 
@@ -371,17 +372,6 @@
                 class="w-full text-xs text-gray-500 hover:text-gray-300 mt-1 py-1.5 flex items-center justify-center gap-1.5 transition-colors">
                 <i data-lucide="settings" class="w-3 h-3"></i> Configurar la conexión con Google Sheets
             </button>
-
-            <div class="border-t border-dark-700 mt-5 pt-4">
-                <label class="block text-sm text-gray-400 mb-1">Nómina / Turnos (opcional, columnas Nombre y Turno)</label>
-                <input type="file" id="fileNomina" accept=".xlsx, .xls, .csv"
-                    class="w-full bg-dark-900 border border-dark-700 rounded-lg p-2 text-sm text-gray-300">
-                <p class="text-[11px] text-gray-500 mt-1">Se guarda en este navegador, no hace falta volver a subirla cada vez.</p>
-                <button onclick="procesarNomina()"
-                    class="w-full bg-dark-800 border border-dark-700 hover:border-gray-500 text-gray-300 hover:text-white text-sm py-2 rounded-lg mt-2 transition-colors">
-                    Cargar nómina
-                </button>
-            </div>
         </div>
     </div>
 
@@ -527,12 +517,12 @@
                 <button onclick="cerrarModalConfigSheets()" class="text-gray-400 hover:text-white"><i data-lucide="x"
                         class="w-5 h-5"></i></button>
             </div>
-            <p class="text-xs text-gray-500 mb-3">Se configura una sola vez. Tu Google Sheets es la base: pegás ahí los reportes (hojas "Productividad" y "Estado de TR", con columna de fecha) y el dashboard los lee desde acá con "Actualizar ahora".</p>
+            <p class="text-xs text-gray-500 mb-3">Se configura una sola vez. Tu Google Sheets es la base: pegás ahí los reportes (hojas "Productividad", "Estado de TR" y "Nómina") y el dashboard los lee desde acá con "Actualizar ahora".</p>
 
             <ol class="text-xs text-gray-400 space-y-1.5 mb-4 list-decimal list-inside">
-                <li>En tu Google Sheets, creá (o renombrá) dos hojas: <b class="text-gray-200">Productividad</b> y <b class="text-gray-200">Estado de TR</b>.</li>
-                <li>En cada una, la primera fila son los encabezados (los nombres de columna del reporte que bajás de tu sistema) — agregá una columna <b class="text-gray-200">Día</b> o <b class="text-gray-200">Fecha</b> si no la trae.</li>
-                <li>Cada vez que tengas un reporte nuevo, pegalo como filas nuevas abajo de lo que ya había (no lo borres, así se acumulan todos los días).</li>
+                <li>En tu Google Sheets, creá (o renombrá) tres hojas: <b class="text-gray-200">Productividad</b>, <b class="text-gray-200">Estado de TR</b> y <b class="text-gray-200">Nómina</b>.</li>
+                <li>En "Productividad" y "Estado de TR", la primera fila son los encabezados (los nombres de columna del reporte que bajás de tu sistema) — agregá una columna <b class="text-gray-200">Día</b> o <b class="text-gray-200">Fecha</b> si no la trae, y cada vez que tengas un reporte nuevo pegalo como filas nuevas abajo de lo que ya había (no lo borres, así se acumulan todos los días).</li>
+                <li>En "Nómina" no hace falta fecha: primera fila con encabezados <b class="text-gray-200">Nombre</b> y <b class="text-gray-200">Turno</b>, una fila por operario. Se usa siempre tal cual está, así que para dar de alta o baja a alguien simplemente editás esa hoja.</li>
                 <li>Menú <b class="text-gray-200">Extensiones → Apps Script</b>.</li>
                 <li>Borrá lo que haya en el editor y pegá el script (lo copiás con el botón de abajo).</li>
                 <li><b class="text-gray-200">Implementar → Nueva implementación</b>. Tipo: <b class="text-gray-200">Aplicación web</b>. Acceso: <b class="text-gray-200">Cualquier usuario</b>.</li>
