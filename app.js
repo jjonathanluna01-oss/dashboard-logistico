@@ -1409,17 +1409,14 @@ let histTab = 'cargas';
 let fuenteHistorial = 'local'; // 'local' (este navegador) | 'sheets' (Google Sheets)
 let reportePeriodoActual = null; // último reporte calculado, para exportar a PDF
 let tokenHistorial = 0; // evita que una respuesta vieja de Sheets pise una más nueva
+let diasSeleccionados = null; // Set de 'YYYY-MM-DD' elegidos para el período; null = todavía sin calcular (arranca con los últimos días disponibles)
+let entradasSheetsCache = null; // último resultado leído de Sheets, para no repetir el fetch cada vez que se tilda/destilda un día
 
 function diaDeEntrada(e) {
     return (e && (e.dia || (e.timestamp || '').slice(0, 10))) || '';
 }
 
 function abrirModalHistorial() {
-    const r = rangoPreset('7dias');
-    const desdeEl = document.getElementById('histDesde');
-    const hastaEl = document.getElementById('histHasta');
-    if (desdeEl && !desdeEl.value) desdeEl.value = r.desde;
-    if (hastaEl && !hastaEl.value) hastaEl.value = r.hasta;
     switchHistTab(histTab);
     renderizarSeccionHistorial();
     document.getElementById('modalHistorial').classList.remove('hidden');
@@ -1450,21 +1447,35 @@ function switchHistTab(tab) {
     });
 }
 
+// Días (YYYY-MM-DD) que existen en la fuente activa, ordenados. En modo
+// Sheets usa la última lectura cacheada (sin red) para que tildar/destildar
+// chips sea instantáneo; "Actualizar lista de días" fuerza un refetch.
+function diasDisponiblesHistorial() {
+    const entradas = fuenteHistorial === 'sheets' ? (entradasSheetsCache || []) : cargarHistorial();
+    return Array.from(new Set(entradas.map(diaDeEntrada).filter(Boolean))).sort();
+}
+
+// Tilda, de los días ya cargados, los que caen dentro del preset elegido.
 function setRangoHistorial(preset) {
-    let r;
+    const disponibles = diasDisponiblesHistorial();
     if (preset === 'todo') {
-        // En modo "Google Sheets" no tenemos de antemano el rango real de
-        // fechas guardadas sin pedirlo (no vale la pena otro viaje sólo para
-        // eso); se usa un rango bien amplio y listo, igual que rangoPreset.
-        const dias = fuenteHistorial === 'local' ? cargarHistorial().map(diaDeEntrada).filter(Boolean).sort() : [];
-        r = dias.length ? { desde: dias[0], hasta: dias[dias.length - 1] } : rangoPreset('todo');
+        diasSeleccionados = new Set(disponibles);
     } else {
-        r = rangoPreset(preset);
+        const r = rangoPreset(preset);
+        diasSeleccionados = new Set(disponibles.filter(d => d >= r.desde && d <= r.hasta));
     }
-    const desdeEl = document.getElementById('histDesde');
-    const hastaEl = document.getElementById('histHasta');
-    if (desdeEl) desdeEl.value = r.desde;
-    if (hastaEl) hastaEl.value = r.hasta;
+    renderizarSeccionHistorial();
+}
+
+function limpiarSeleccionDias() {
+    diasSeleccionados = new Set();
+    renderizarSeccionHistorial();
+}
+
+function toggleDiaHistorial(dia) {
+    if (!diasSeleccionados) diasSeleccionados = new Set();
+    if (diasSeleccionados.has(dia)) diasSeleccionados.delete(dia);
+    else diasSeleccionados.add(dia);
     renderizarSeccionHistorial();
 }
 
@@ -1479,60 +1490,93 @@ function setFuenteHistorial(fuente) {
     renderizarSeccionHistorial();
 }
 
-function filtrarHistorialPorRango(desde, hasta) {
-    return cargarHistorial().filter(e => {
-        const d = diaDeEntrada(e);
-        return d && (!desde || d >= desde) && (!hasta || d <= hasta);
-    });
+// Etiqueta corta de chip para un día, ej. "lun 21/09".
+function etiquetaDiaChip(diaISO) {
+    const f = new Date(diaISO + 'T12:00:00');
+    if (isNaN(f)) return diaISO;
+    const dia = f.toLocaleDateString(LOCALE, { weekday: 'short' }).replace('.', '');
+    const fecha = f.toLocaleDateString(LOCALE, { day: '2-digit', month: '2-digit' });
+    return `${dia} ${fecha}`;
 }
 
-async function renderizarSeccionHistorial() {
+function renderizarChipsDias(dias) {
+    const cont = document.getElementById('histDiasChips');
+    if (!cont) return;
+    if (!dias.length) {
+        cont.innerHTML = '<span class="text-gray-600 text-xs">Todavía no hay ningún día cargado.</span>';
+        return;
+    }
+    cont.innerHTML = dias.map(d => {
+        const activo = diasSeleccionados && diasSeleccionados.has(d);
+        const clase = activo
+            ? 'bg-brand-accent text-white border-brand-accent'
+            : 'bg-dark-800 border-dark-700 text-gray-400 hover:text-white hover:border-gray-500';
+        return `<button onclick="toggleDiaHistorial('${d}')" class="text-xs px-2.5 py-1 rounded-lg border transition-colors ${clase}">${etiquetaDiaChip(d)}</button>`;
+    }).join('');
+}
+
+async function renderizarSeccionHistorial(forzarRefrescoSheets) {
     const miToken = ++tokenHistorial;
-    const desde = (document.getElementById('histDesde') || {}).value || '';
-    const hasta = (document.getElementById('histHasta') || {}).value || '';
     const resumenEl = document.getElementById('histRangoResumen');
     const sufijoFuente = fuenteHistorial === 'sheets' ? ' (Google Sheets)' : '';
 
-    let entradas;
+    let todasLasEntradas;
     if (fuenteHistorial === 'sheets') {
         if (!obtenerWebhookSheets()) {
             if (resumenEl) resumenEl.innerText = '· configurá Google Sheets primero';
+            renderizarChipsDias([]);
             renderizarListaCargas([]);
             reportePeriodoActual = armarReportePeriodo([]);
             renderizarReportePeriodo(reportePeriodoActual);
             abrirModalConfigSheets();
             return;
         }
-        if (resumenEl) resumenEl.innerText = '· cargando desde Google Sheets…';
-        try {
-            entradas = await leerEntradasDesdeGoogleSheets(desde, hasta);
-            if (miToken !== tokenHistorial) return; // una carga más nueva ya está en curso
-        } catch (e) {
-            if (miToken !== tokenHistorial) return;
-            console.warn('No se pudo leer desde Google Sheets:', e);
-            mostrarToast(e.message || 'No se pudo leer desde Google Sheets.', 'danger');
-            if (resumenEl) resumenEl.innerText = '· error leyendo Google Sheets';
-            renderizarListaCargas([]);
-            reportePeriodoActual = armarReportePeriodo([]);
-            renderizarReportePeriodo(reportePeriodoActual);
-            return;
+        if (forzarRefrescoSheets || !entradasSheetsCache) {
+            if (resumenEl) resumenEl.innerText = '· cargando desde Google Sheets…';
+            try {
+                const datos = await leerFilasCrudasDeSheets();
+                if (miToken !== tokenHistorial) return; // una carga más nueva ya está en curso
+                entradasSheetsCache = construirEntradasPorDia(datos.productividad || [], datos.estadoTR || []);
+            } catch (e) {
+                if (miToken !== tokenHistorial) return;
+                console.warn('No se pudo leer desde Google Sheets:', e);
+                mostrarToast(e.message || 'No se pudo leer desde Google Sheets.', 'danger');
+                if (resumenEl) resumenEl.innerText = '· error leyendo Google Sheets';
+                renderizarChipsDias([]);
+                renderizarListaCargas([]);
+                reportePeriodoActual = armarReportePeriodo([]);
+                renderizarReportePeriodo(reportePeriodoActual);
+                return;
+            }
         }
+        todasLasEntradas = entradasSheetsCache;
     } else {
-        entradas = filtrarHistorialPorRango(desde, hasta);
+        todasLasEntradas = cargarHistorial();
     }
 
+    const diasDisponibles = Array.from(new Set(todasLasEntradas.map(diaDeEntrada).filter(Boolean))).sort();
+    if (!diasSeleccionados) {
+        diasSeleccionados = new Set(diasDisponibles.slice(-7)); // arranca mostrando los últimos días cargados
+    } else {
+        diasSeleccionados = new Set([...diasSeleccionados].filter(d => diasDisponibles.includes(d)));
+    }
+
+    renderizarChipsDias(diasDisponibles);
+    const entradas = todasLasEntradas.filter(e => diasSeleccionados.has(diaDeEntrada(e)));
+
     if (resumenEl) {
-        const dias = new Set(entradas.map(diaDeEntrada)).size;
-        resumenEl.innerText = entradas.length
-            ? `· ${entradas.length} carga${entradas.length === 1 ? '' : 's'} en ${dias} día${dias === 1 ? '' : 's'}${sufijoFuente}`
-            : `· sin datos en este período${sufijoFuente}`;
+        if (entradas.length) {
+            resumenEl.innerText = `· ${entradas.length} carga${entradas.length === 1 ? '' : 's'} en ${diasSeleccionados.size} día${diasSeleccionados.size === 1 ? '' : 's'} elegido${diasSeleccionados.size === 1 ? '' : 's'}${sufijoFuente}`;
+        } else {
+            resumenEl.innerText = diasDisponibles.length ? `· elegí al menos un día de la lista${sufijoFuente}` : `· todavía no hay datos cargados${sufijoFuente}`;
+        }
     }
 
     renderizarListaCargas(entradas);
     reportePeriodoActual = armarReportePeriodo(entradas);
     renderizarReportePeriodo(reportePeriodoActual);
     // La base de datos de TR's es siempre local: Sheets no guarda ese detalle.
-    if (fuenteHistorial === 'local') renderizarBaseDeDatosTR(desde, hasta);
+    if (fuenteHistorial === 'local') renderizarBaseDeDatosTR(Array.from(diasSeleccionados));
 }
 
 // --------------------------------------------------------
@@ -1682,13 +1726,6 @@ async function leerFilasCrudasDeSheets() {
     return datos; // { ok, productividad: [...], estadoTR: [...] }
 }
 
-// Para el reporte de período: trae, agrupa y filtra al rango elegido.
-async function leerEntradasDesdeGoogleSheets(desde, hasta) {
-    const datos = await leerFilasCrudasDeSheets();
-    const entradas = construirEntradasPorDia(datos.productividad || [], datos.estadoTR || []);
-    return entradas.filter(e => e.dia && (!desde || e.dia >= desde) && (!hasta || e.dia <= hasta));
-}
-
 // Acción principal del botón "Actualizar ahora": trae TODO lo que haya en
 // Sheets, guarda cada día en el historial local (para las comparativas de
 // período) y muestra el día más reciente en el dashboard/DB, como si se
@@ -1713,6 +1750,10 @@ async function sincronizarDesdeGoogleSheets() {
             if (estadoEl) estadoEl.innerText = msg;
             return;
         }
+
+        entradasSheetsCache = entradas; // refresca la lista de días disponibles del filtro de período
+        // si ya había una selección de días armada, se le suman los que trajo esta sincronización
+        if (diasSeleccionados) entradas.forEach(en => diasSeleccionados.add(en.dia));
 
         // Guarda cada día en el historial local (comparativas de período)
         // y, si trajo filas de TR, en la base de datos local de detalle.
@@ -1757,7 +1798,7 @@ function renderizarListaCargas(entradas) {
     if (!cont) return;
     const lista = [...entradas].reverse();
     if (!lista.length) {
-        cont.innerHTML = '<p class="text-gray-500 text-center py-6 text-sm">No hay cargas en este período. Probá ampliar el rango o tocar "Todo".</p>';
+        cont.innerHTML = '<p class="text-gray-500 text-center py-6 text-sm">No hay ningún día elegido. Tocá alguno de los días de arriba, o "Todo".</p>';
         return;
     }
     cont.innerHTML = lista.map(h => {
@@ -1791,14 +1832,20 @@ function formatearValorCelda(v) {
     return String(v);
 }
 
-async function renderizarBaseDeDatosTR(desde, hasta) {
+// diasElegidos: array de 'YYYY-MM-DD'. La consulta a IndexedDB sólo puede
+// pedir un rango continuo, así que se trae [min, max] de esos días y después
+// se descartan acá los días intermedios que no estén en la selección.
+async function renderizarBaseDeDatosTR(diasElegidos) {
     const cont = document.getElementById('baseDatosTRContenido');
     const resumenEl = document.getElementById('baseDatosTRResumen');
     if (!cont) return;
 
+    const dias = (diasElegidos || []).slice().sort();
+    const setDias = new Set(dias);
+
     let registros = [];
     try {
-        registros = await obtenerRegistrosTR(desde, hasta);
+        registros = dias.length ? (await obtenerRegistrosTR(dias[0], dias[dias.length - 1])).filter(r => setDias.has(r.dia)) : [];
     } catch (e) {
         console.warn('No se pudo leer la base de datos de TR\'s:', e);
         cont.innerHTML = '<p class="text-brand-danger text-center py-8 text-sm">No se pudo leer la base de datos local de este navegador.</p>';
@@ -1884,8 +1931,9 @@ function exportarBaseDeDatosTR() {
     const libro = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(libro, hoja, 'TRs');
 
-    const desde = (document.getElementById('histDesde') || {}).value || 'inicio';
-    const hasta = (document.getElementById('histHasta') || {}).value || fechaLocalISO();
+    const diasExportados = ultimaBaseDatosTR.map(r => r.dia).filter(Boolean).sort();
+    const desde = diasExportados[0] || 'inicio';
+    const hasta = diasExportados[diasExportados.length - 1] || fechaLocalISO();
     XLSX.writeFile(libro, `base_datos_TR_${desde}_a_${hasta}.xlsx`);
 }
 
