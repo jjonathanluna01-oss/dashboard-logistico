@@ -396,26 +396,23 @@
                         class="w-5 h-5"></i></button>
             </div>
 
-            <!-- Selector de rango -->
+            <!-- Selector de días -->
             <div class="bg-dark-900 border border-dark-700 rounded-xl p-3 mb-4">
                 <div class="flex flex-wrap items-center gap-2 mb-3">
-                    <span class="text-xs text-gray-500 mr-1">Período:</span>
+                    <span class="text-xs text-gray-500 mr-1">Elegir:</span>
                     <button onclick="setRangoHistorial('semana')" class="text-xs px-2.5 py-1 rounded-lg bg-dark-800 border border-dark-700 hover:border-brand-accent text-gray-300 hover:text-white transition-colors">Esta semana</button>
                     <button onclick="setRangoHistorial('semana-pasada')" class="text-xs px-2.5 py-1 rounded-lg bg-dark-800 border border-dark-700 hover:border-brand-accent text-gray-300 hover:text-white transition-colors">Semana pasada</button>
                     <button onclick="setRangoHistorial('7dias')" class="text-xs px-2.5 py-1 rounded-lg bg-dark-800 border border-dark-700 hover:border-brand-accent text-gray-300 hover:text-white transition-colors">Últimos 7 días</button>
                     <button onclick="setRangoHistorial('todo')" class="text-xs px-2.5 py-1 rounded-lg bg-dark-800 border border-dark-700 hover:border-brand-accent text-gray-300 hover:text-white transition-colors">Todo</button>
+                    <button onclick="limpiarSeleccionDias()" class="text-xs px-2.5 py-1 rounded-lg bg-dark-800 border border-dark-700 hover:border-brand-accent text-gray-300 hover:text-white transition-colors">Ninguno</button>
+                    <button onclick="renderizarSeccionHistorial(true)" title="Volver a traer la lista de días desde Google Sheets"
+                        class="text-xs px-2 py-1 rounded-lg bg-dark-800 border border-dark-700 hover:border-brand-accent text-gray-400 hover:text-white transition-colors ml-auto flex items-center gap-1">
+                        <i data-lucide="refresh-cw" class="w-3 h-3"></i> Actualizar días
+                    </button>
                 </div>
-                <div class="flex flex-wrap items-center gap-3 text-xs text-gray-400">
-                    <label class="flex items-center gap-1.5">Desde
-                        <input type="date" id="histDesde" onchange="renderizarSeccionHistorial()"
-                            class="bg-dark-800 border border-dark-700 rounded-lg px-2 py-1 text-white focus:outline-none focus:border-brand-accent">
-                    </label>
-                    <label class="flex items-center gap-1.5">Hasta
-                        <input type="date" id="histHasta" onchange="renderizarSeccionHistorial()"
-                            class="bg-dark-800 border border-dark-700 rounded-lg px-2 py-1 text-white focus:outline-none focus:border-brand-accent">
-                    </label>
-                    <span id="histRangoResumen" class="text-gray-500"></span>
-                </div>
+                <p class="text-[11px] text-gray-600 mb-2">Tocá los días que querés ver o comparar (se arma con los que ya se cargaron):</p>
+                <div id="histDiasChips" class="flex flex-wrap items-center gap-1.5"></div>
+                <div class="text-xs text-gray-500 mt-2" id="histRangoResumen"></div>
             </div>
 
             <!-- Fuente de datos: este navegador (local) o Google Sheets (todas las PCs) -->
